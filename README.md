@@ -1,3 +1,5 @@
+<div align="center">
+
 # everyone-content
 
 <img src="frontend/public/brand/mascot.png" alt="everyone-content的小电视角色" width="96" />
@@ -5,11 +7,14 @@
 **本地优先的多账号内容运营工作台**：用抖音指数发现选题素材，用账号画像约束决策，更快速、更高质量完成「采集 → 选题 → 评估 → 写作」的全过程。
 
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPLv3-blue.svg)](LICENSE)
-![Node](https://img.shields.io/badge/node-%E2%89%A524-green)
+[![Node](https://img.shields.io/badge/node-%E2%89%A524-green)
 ![Local-first](https://img.shields.io/badge/data-local--first-orange)
 [![CI](https://github.com/gallagherjas/everyone-content/actions/workflows/ci.yml/badge.svg)](https://github.com/gallagherjas/everyone-content/actions/workflows/ci.yml)
 
 简体中文 | [English](README_EN.md)
+
+</div>
+
 
 ## 它解决什么问题
 

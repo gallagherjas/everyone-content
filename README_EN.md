@@ -1,3 +1,5 @@
+<div align="center">
+
 # everyone-content
 
 <img src="frontend/public/brand/mascot.png" alt="everyone-content mascot" width="96" />
@@ -5,11 +7,14 @@
 **A local-first workbench for multi-account content operations**: discover topic material through the Douyin Index, ground decisions in per-account profiles, and complete the whole collect → select → review → write process faster and with higher quality.
 
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPLv3-blue.svg)](LICENSE)
-![Node](https://img.shields.io/badge/node-%E2%89%A524-green)
+[![Node](https://img.shields.io/badge/node-%E2%89%A524-green)
 ![Local-first](https://img.shields.io/badge/data-local--first-orange)
 [![CI](https://github.com/gallagherjas/everyone-content/actions/workflows/ci.yml/badge.svg)](https://github.com/gallagherjas/everyone-content/actions/workflows/ci.yml)
 
 [简体中文](README.md) | English
+
+</div>
+
 
 ## What problem it solves
 
