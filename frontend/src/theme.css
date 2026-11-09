@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+@theme {
+  --color-paper: #f6f4ec;
+  --color-card: #fffdf7;
+  --color-line: #e6e1d3;
+  --color-ink: #26241d;
+  --color-muted: #8d8776;
+  --color-brand: #3e5c4b;
+  --color-brand-deep: #2e4637;
+  --color-clay: #b0663c;
+  --color-amber: #96762e;
+  --color-fade: #a8a294;
+  --font-display: "Songti SC", "STSong", "Noto Serif SC", "Source Han Serif SC", serif;
+  --font-sans: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+html { background: var(--color-paper); }
+body { @apply text-ink font-sans antialiased; }
+
+@layer components {
+  .panel { @apply rounded-2xl border border-line bg-card p-5 sm:p-6; }
+  .field { @apply w-full rounded-xl border border-line bg-paper px-3 py-2 text-sm outline-none focus:border-brand disabled:opacity-50; }
+  /* 表单纵排:label 包裹的输入框统一与标签文字的间距,不再逐处写 mt */
+  label > .field { @apply mt-2.5; }
+  /* 统一下拉箭头,替代原生 select 外观 */
+  select.field {
+    @apply appearance-none pr-9;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238d8776' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.7rem center;
+  }
+  .btn { @apply rounded-xl border border-line px-4 py-2 text-sm transition hover:border-brand hover:text-brand disabled:opacity-40 disabled:cursor-not-allowed; }
+  .btn-primary { @apply rounded-xl bg-brand px-4 py-2 text-sm text-paper transition hover:bg-brand-deep disabled:opacity-40 disabled:cursor-not-allowed; }
+  /* 采集进行中的按钮:浅色底,品牌绿从左侧推进,双层文字用 clip-path 对齐裁切 */
+  .btn-progress { @apply relative min-w-24 cursor-wait overflow-hidden rounded-xl border border-line bg-paper px-4 py-2 text-sm text-muted; }
+  /* 行内小按钮(表格/列表行操作、分页) */
+  .btn-sm { @apply rounded-full border border-line px-3.5 py-1 text-xs text-muted transition hover:border-brand hover:text-brand disabled:opacity-40 disabled:cursor-not-allowed; }
+  /* 日志/策略正文等预格式块 */
+  .codebox { @apply overflow-auto rounded-xl bg-paper p-4 text-xs leading-6 whitespace-pre-wrap break-words; }
+  /* 数据表格基线:首列左对齐 pl-5,末列 pr-5,数字列由页面自行 text-right */
+  .tbl { @apply w-full text-sm; }
+  .tbl thead tr { @apply border-b border-line text-[12px] tracking-wide text-muted; }
+  .tbl th { @apply px-3 py-3 text-right font-normal; }
+  .tbl th:first-child { @apply pl-5 text-left; }
+  .tbl th:last-child { @apply pr-5; }
+  .tbl tbody tr { @apply border-b border-line/60 transition last:border-0 hover:bg-paper; }
+  .tbl tbody td { @apply px-3 py-3; }
+  .tbl td:first-child { @apply pl-5; }
+  .tbl td:last-child { @apply pr-5; }
+}
+
+::selection { background: #3e5c4b22; }
+
+/* 细滚动条 */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #d8d2c2; border-radius: 8px; }
+::-webkit-scrollbar-track { background: transparent; }

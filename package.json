@@ -1,0 +1,17 @@
+{
+  "name": "everyone-content",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "db:init": "node db/init.ts",
+    "collect": "sh bin/collect.sh",
+    "web": "node server/index.ts",
+    "dev:web": "npm --prefix frontend run dev",
+    "build:web": "npm --prefix frontend run build",
+    "test": "node --test tests/*.test.ts tests/collector/*.test.mjs",
+    "collection:plan": "sh bin/collect.sh --plan"
+  }
+}
