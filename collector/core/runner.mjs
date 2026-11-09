@@ -7,6 +7,7 @@ import { planCollection } from './planner.mjs';
 const DAY=86400000,HOUR=3600000;
 export function controlledError(error) {
   if(['ECONNREFUSED','ENOTFOUND','EHOSTUNREACH'].includes(error?.cause?.code??error?.code))return 'service_unavailable';
+  if(error?.message==='login_or_challenge_html')return 'login_required';
   const code=String(error?.message??'');
   return /^(daily_budget_exhausted|tick_budget_exhausted|source_paused|source_dates_missing|login_required|rate_limited|payment_required|schema_error|decode_error|unsupported_encryption|identity_conflict|auth_required|invalid_auth_cookie|invalid_user_agent|auth_file_must_be_private_0600|transport_error|service_unavailable|business_error|http_error_\d+)$/.test(code)?code:error?.code==='SCHEMA_ERROR'?'schema_error':error?.code==='ENOENT'?'auth_required':'request_failed';
 }

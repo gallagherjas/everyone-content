@@ -7,10 +7,12 @@ import { join } from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { once } from 'node:events';
+import { COMPLETE_PROFILE } from './support/profile.ts';
 
 const dir = mkdtempSync(join(tmpdir(), 'everyone-accounts-'));
 process.env.EVERYONE_CONTENT_GIT_ROOT = join(dir, 'git');
 process.env.EVERYONE_CONTENT_DATA_DIR = join(dir, 'runtime');
+process.env.EVERYONE_CONTENT_INSTRUCTIONS_PATH = join(dir, 'AGENTS.md');
 mkdirSync(process.env.EVERYONE_CONTENT_GIT_ROOT);
 execFileSync('git', ['init', '-q', process.env.EVERYONE_CONTENT_GIT_ROOT]);
 after(() => rmSync(dir, { recursive: true, force: true }));
@@ -66,13 +68,21 @@ test('账号隔离、画像生效、指数配置与发布登记可通过本地AP
     const [first] = await request('/api/accounts');
     const second = await request('/api/accounts', undefined, 'POST', { name: '独立账号' }, 201);
     await request('/api/context', undefined, 'GET', undefined, 400);
+    const overview = await request('/api/initialization');
+    assert.equal(overview.accounts.find((row: any) => row.account_id === second.id).initialized, false);
+    const login = await request('/api/index-auth', second.id);
+    assert.equal(login.configured, false);
+    assert.ok(!('cookie' in login));
     const initial = await request('/api/strategy', second.id);
     assert.match(initial.published['account-profile.md'], /填写：领域/);
-    const profile = '# 账号画像\n\n## 账号定位\n分享阳台园艺知识。\n\n## 目标人群\n城市园艺新手。\n';
+    const profile = COMPLETE_PROFILE;
     const draft = await request('/api/strategy/draft', second.id, 'PUT', { docs: { 'account-profile.md': profile }, base_sha: initial.sha });
     assert.notEqual(draft.published['account-profile.md'], profile);
     const active = await request('/api/strategy/publish', second.id, 'POST', { base_sha: initial.sha, note: '初始化账号画像' });
     assert.equal(active.published['account-profile.md'], profile);
+    assert.equal(active.initialization.initialized, true);
+    assert.equal(active.instructions_synced, true);
+    assert.equal((await request('/api/initialization')).accounts.find((row: any) => row.account_id === second.id).initialized, true);
     assert.equal((await request('/api/context', second.id)).strategy_sha, active.sha);
     await request(`/api/context?strategy_sha=${active.sha}`, first.id, 'GET', undefined, 404);
     await request('/api/strategy/draft', second.id, 'PUT', { docs: { 'account-profile.md': profile }, base_sha: initial.sha }, 409);
@@ -102,6 +112,8 @@ test('账号隔离、画像生效、指数配置与发布登记可通过本地AP
     assert.equal((await request('/api/works', second.id)).total, 0);
     await request(`/api/accounts/${second.id}`, second.id, 'PUT', { status: 'archived' });
     await request('/api/keywords', second.id, 'POST', { keyword: '归档后不得写入' }, 409);
+    await request('/api/index-auth/cancel', second.id, 'POST');
+    await request('/api/index-auth/start', second.id, 'POST', undefined, 409);
   } finally {
     const exited = once(child, 'exit'); child.kill(); await exited;
   }

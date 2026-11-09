@@ -207,3 +207,13 @@ test('指数按30天门槛前三生成关联任务，筛后入库并保留可用
   assert.equal(db.prepare('SELECT COUNT(*) n FROM collection_runs').get().n,before);
  }finally{db.close();}
 });
+test('指数返回登录页时暂停本账号授权范围，不将HTML当作采集数据', async () => {
+ const {db,store}=setup();try{
+  auth(db,1,'test-only');
+  const result=await runCollection(store,{accountIds:[1],only:'index',clock:()=>base,sleep:async()=>{},fetchImpl:async()=>new Response('<html>login</html>',{headers:{'content-type':'text/html'}})});
+  assert.equal(result.failed,1);
+  const state=db.prepare("SELECT paused,error FROM collection_provider_state WHERE provider='index' AND scope='account:1'").get();
+  assert.equal(state.paused,1);assert.equal(state.error,'login_required');
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM works').get().n,0);
+ }finally{db.close();}
+});

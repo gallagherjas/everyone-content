@@ -13,5 +13,8 @@
     "build:web": "npm --prefix frontend run build",
     "test": "node --test tests/*.test.ts tests/collector/*.test.mjs",
     "collection:plan": "sh bin/collect.sh --plan"
+  },
+  "dependencies": {
+    "playwright": "^1.65.0"
   }
 }

@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useApi, fmtTime } from '../api';
 import { ConfirmBtn, LinkBtn, Msg } from './Common';
+import { profileCompletion, type ProfileCompletion } from '../../../lib/profile';
 interface State {
+  instructions_synced?: boolean;
+  initialization: ProfileCompletion;
   sha: string;
   base_sha: string;
   draft: Record<string, string>;
@@ -60,6 +63,7 @@ export default function StrategyEditor({ disabled = false }: { disabled?: boolea
     }
   };
   const stale = !!state && state.sha !== state.base_sha;
+  const draftCompletion = profileCompletion(body);
   return (
     <div className="space-y-5">
       <section className="panel space-y-4">
@@ -67,8 +71,13 @@ export default function StrategyEditor({ disabled = false }: { disabled?: boolea
           <h2 className="font-display text-xl">账号画像</h2>
           {state && <span className="text-xs text-muted">版本 {state.sha.slice(0, 8)}</span>}
         </div>
-        <p className="text-sm text-muted">填写已确定的定位、受众、目标与表达边界，保留版本历史。</p>
+        <p className="text-sm text-muted">逐项填写画像的七个部分；保存并生效后，系统按完整性更新初始化状态。不适用的项目请明确说明。</p>
+        {state && <p className="text-sm" aria-label="画像初始化状态">生效画像：{state.initialization?.initialized ? '已完成初始化' : '尚未完成初始化'}</p>}
+        {state && <p className="text-xs text-muted">{draftCompletion.initialized
+          ? '当前编辑内容已填写完整，保存并生效后完成初始化。'
+          : `当前编辑内容待补充：${draftCompletion.missing_sections.join('、')}。可先保存草稿。`}</p>}
         {stale && <Msg tone="error">草稿基于旧版本，请核对后重新加载。</Msg>}
+        {state?.instructions_synced === false && <Msg tone="error">画像已保存，但AGENTS.md状态未能同步，请检查项目目录的写入权限。</Msg>}
         {state && (
           <>
             <textarea

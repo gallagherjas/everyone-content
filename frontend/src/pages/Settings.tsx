@@ -5,6 +5,7 @@ import StrategyEditor from "../components/StrategyEditor";
 import CollectionRules from "../components/CollectionRules";
 import CollectionSchedule from "../components/CollectionSchedule";
 import SourceBudgets from "../components/SourceBudgets";
+import IndexAuthorization from "../components/IndexAuthorization";
 import { ConfirmBtn, Msg, Tag, type Tone } from "../components/Common";
 import { KeepAlive, useCachedLoad } from "../components/PageCache";
 import Pager, { usePaged } from "../components/Pager";
@@ -117,6 +118,7 @@ export default function SettingsPage({ current, onUpdate }: { current: Account; 
         </section>
       </KeepAlive>
       <KeepAlive active={section === "rules"}>
+        <IndexAuthorization disabled={archived} />
         <SourceBudgets />
         <CollectionSchedule account={current} onSaved={onUpdate} />
         <CollectionRules account={current} onSaved={async value => { onUpdate(value); }} />

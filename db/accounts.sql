@@ -8,6 +8,13 @@ CREATE TABLE IF NOT EXISTS accounts (
   strategy_sha TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS account_initialization (
+  account_id INTEGER PRIMARY KEY REFERENCES accounts(id),
+  strategy_sha TEXT NOT NULL,
+  schema_version INTEGER NOT NULL,
+  initialized INTEGER NOT NULL CHECK(initialized IN (0,1)),
+  missing_sections TEXT NOT NULL CHECK(json_valid(missing_sections))
+);
 CREATE TABLE IF NOT EXISTS account_sources (
   id INTEGER PRIMARY KEY,
   account_id INTEGER NOT NULL REFERENCES accounts(id),

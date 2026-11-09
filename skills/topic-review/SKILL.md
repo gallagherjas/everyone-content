@@ -9,8 +9,8 @@ description: 用户要求评估自己的选题是否适合账号、检查目标�
 
 ## 输入与依据
 
-- 先执行 [账号初始化的前置检查](../account-initialization/SKILL.md)。必要画像缺失时先补齐，已有资料齐全则直接继续。
-- 确认 `account_id`，通过带 `x-everyone-content-account` 的 `GET /api/context` 核对账号及生效画像版本，读取其中的 `account-profile.md`。账号隔离规则见 [账号说明](../../docs/MULTI_ACCOUNT.md)。
+- 先看`AGENTS.md`中的当前账号状态。`initialized=true`时直接评估，不加载初始化流程；`initialized=false`时才转入[账号初始化](../account-initialization/SKILL.md)，完成后继续原请求。
+- 确认 `account_id`，通过带 `x-everyone-content-account` 的 `GET /api/context` 核对`initialized`及生效画像版本，读取其中的 `account-profile.md`。账号隔离规则见 [账号说明](../../docs/MULTI_ACCOUNT.md)。
 - 让用户提供：**标题、目标群体、主要价值（一句话）**。缺项时只询问缺项，不代填。
 - 以用户明确的信息和账号画像为依据。画像留白、受众范围不明时进行询问，不能把未写明当作不符合。
 

@@ -47,6 +47,7 @@ test('页面缓存保留分页、草稿和滚动位置，按需更新数据，�
     else if (url.pathname === '/api/works') data = { total: 45, items: [{ id: 1, url: 'https://www.douyin.com/video/1', title: `账号${account}第${url.searchParams.get('page')}页作品`, author: '测试博主', status: 'live', metrics: {}, engagement: 100, growth: null, published_at: null }] };
     else if (url.pathname === '/api/contents') data = [];
     else if (url.pathname === '/api/sources') data = { bloggers: [], keywords: [] };
+    else if (url.pathname === '/api/index-auth') data = { status: 'missing', configured: false, message: '尚未连接抖音指数。' };
     else if (url.pathname === '/api/collection/config') data = accounts.find(value => value.id === account);
     else if (url.pathname === '/api/strategy') data = { sha: 'a'.repeat(40), base_sha: 'a'.repeat(40), draft: { 'account-profile.md': '初始画像' }, published: {}, history: [] };
     else if (url.pathname === '/api/keywords' && method === 'POST') data = { ok: true };

@@ -1,6 +1,13 @@
 import { readFileSync, statSync } from 'node:fs';
 import { ORIGIN, PATHS, decode, unwrap, validateData } from './protocol.mjs';
 
+export function authFromCookies(cookies, userAgent) {
+  const now = Date.now()/1000;
+  const selected = cookies.filter(c => ['creator.douyin.com','.douyin.com','douyin.com'].includes(c.domain)
+    && c.value && (!c.expires || c.expires < 0 || c.expires > now) && '/api/v2/'.startsWith(c.path || '/'));
+  return {cookie:selected.map(c=>`${c.name}=${c.value}`).join('; '),userAgent};
+}
+
 export function loadAuth(file, env = process.env) {
   let auth;
   if (env.DOUYIN_INDEX_COOKIE) auth = {cookie:env.DOUYIN_INDEX_COOKIE,userAgent:env.DOUYIN_INDEX_USER_AGENT};
@@ -9,11 +16,7 @@ export function loadAuth(file, env = process.env) {
     const stat = statSync(file);
     if (!stat.isFile() || (stat.mode & 0o077)) throw new Error('auth_file_must_be_private_0600');
     auth = JSON.parse(readFileSync(file,'utf8'));
-    // Optional externally supplied Playwright storageState; never read browser profiles.
-    if (Array.isArray(auth.cookies)) {
-      const now = Date.now()/1000;
-      auth = {userAgent:auth.userAgent,cookie:auth.cookies.filter(c => ['creator.douyin.com','.douyin.com','douyin.com'].includes(c.domain) && (!c.expires || c.expires < 0 || c.expires > now) && '/api/v2/'.startsWith(c.path || '/')).map(c=>`${c.name}=${c.value}`).join('; ')};
-    }
+    if (Array.isArray(auth.cookies)) auth = authFromCookies(auth.cookies,auth.userAgent);
   }
   if (typeof auth.cookie !== 'string' || !auth.cookie.trim() || /[\r\n]/.test(auth.cookie)) throw new Error('invalid_auth_cookie');
   if (auth.userAgent !== undefined && (typeof auth.userAgent !== 'string' || /[\r\n]/.test(auth.userAgent))) throw new Error('invalid_user_agent');

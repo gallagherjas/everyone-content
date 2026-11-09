@@ -26,8 +26,12 @@ import {
   context,
   ROOT,
   DATA,
+  INSTRUCTIONS,
 } from '../lib/strategies.ts';
 import { authorId } from '../lib/douyin.ts';
+import { initializationOverview } from '../lib/initialization.ts';
+import { syncAgentInitialization } from '../lib/agent-state.ts';
+import { indexLogin } from '../lib/index-login.ts';
 import { CollectionStore, PROVIDERS, atomic } from '../collector/core/store.mjs';
 import { collectionStatus } from '../collector/core/status.mjs';
 import { planCollection } from '../collector/core/planner.mjs';
@@ -181,12 +185,14 @@ function scheduleCollection() {
 async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: DatabaseSync) {
   const path = url.pathname,
     method = req.method;
+  if (path === '/api/initialization' && method === 'GET') return json(res, initializationOverview(db));
   if (path === '/api/health' && method === 'GET') return json(res, { app: 'everyone-content' });
   if (path === '/api/accounts') {
     if (method === 'GET') return json(res, listAccounts(db));
     if (method === 'POST') {
       const a = createAccount(db, (await body(req)).name);
       ensureStrategy(db, a.id);
+      syncAgentInitialization(db, INSTRUCTIONS);
       return json(res, account(db, a.id), 201);
     }
   }
@@ -194,7 +200,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
     a = account(db, id);
   if (path === '/api/context' && method === 'GET')
     return json(res, context(db, id, url.searchParams.get('strategy_sha')));
-  if (method !== 'GET' && !/^\/api\/accounts\/\d+$/.test(path)) activeAccount(db, id);
+  if (method !== 'GET' && path !== '/api/index-auth/cancel' && !/^\/api\/accounts\/\d+$/.test(path)) activeAccount(db, id);
+  if (path === '/api/index-auth' && method === 'GET') return json(res, indexLogin.state(db, id));
+  if (path === '/api/index-auth/start' && method === 'POST') return json(res, indexLogin.start(db, id), 202);
+  if (path === '/api/index-auth/cancel' && method === 'POST') return json(res, await indexLogin.cancel(db, id));
   const acct = path.match(/^\/api\/accounts\/(\d+)$/);
   if (acct && method === 'PUT') {
     if (Number(acct[1]) !== id) throw new InputError('账号上下文不一致', 409);
@@ -211,6 +220,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
       JSON.stringify(config),
       id,
     );
+    if (status === 'archived') await indexLogin.cancel(db, id);
+    syncAgentInitialization(db, INSTRUCTIONS);
     return json(res, account(db, id));
   }
   if (path === '/api/collection/config') {
@@ -501,6 +512,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
   const db = openDb();
   try {
     for (const a of listAccounts(db)) ensureStrategy(db, a.id);
+    if (!syncAgentInitialization(db, INSTRUCTIONS)) console.warn('AGENTS.md初始化状态尚未同步，请检查项目目录写入权限。');
   } finally {
     db.close();
   }

@@ -4,19 +4,10 @@
 
 ## 首次配置
 
-1. 启动工作台，确认当前账号，在「设置 → 博主与关键词」添加关键词。
-2. 准备本人登录授权文件，存放在仓库外的私有目录。支持Cookie JSON或本人提供的storageState，文件权限须为0600。Cookie JSON的`cookie`字段为登录会话字符串，可附`userAgent`；项目不会读取或导出浏览器凭据。
-3. 为当前账号登记文件：
-
-```sh
-chmod 600 /你的私有目录/指数授权.json
-npm run collection:plan -- --account=1 --auth=/你的私有目录/指数授权.json
-```
-
-替换示例中的编号与路径。登记成功后指数启用；未授权账号不排指数任务。更新授权会解除当前账号的登录暂停并唤醒任务。授权值不写入数据库、参数日志或前端，数据库只保存文件引用。
-
-4. 在「设置 → 采集设置」维护指数门槛、排除词及保留数量；点击「保存并重新筛选」只重算已有资料，不请求新数据。
-5. 在「采集 → 发现结果」点击「手动采集」，或运行：
+1. 启动工作台，在「设置 → 采集设置 → 连接抖音指数」点击「扫码连接抖音指数」。
+2. 项目创建独立浏览器会话并打开官方指数页面。用户扫码并完成页面验证，项目检测登录会话后自动保存凭据；首次使用缺少浏览器时会自动准备，可取消登录。
+3. 会话文件按账号保存在`runtime/authorization/<account_id>/index.json`，目录权限0700、文件权限0600，数据库只保存文件引用。不会读取已有浏览器资料、返回Cookie到前端或启动整轮采集。会话保存不等于已确认指数访问权限，首次采集按真实响应处理。
+4. 添加当前账号关键词，保存筛选规则后手动采集，或运行：
 
 ```sh
 npm run collect -- --account=1
@@ -25,6 +16,18 @@ npm run collection:plan -- --account=1
 ```
 
 `--account`选定账号，未指定时处理全部启用账号。`--limit`限制单轮请求数，`--plan`只规划本地任务。`--only=index`可显式指定来源。
+
+登录失效时重新扫码。关闭登录窗口、取消或超时不会保存未完成的会话。登录流程不改变账号画像的初始化状态。
+
+### 私有文件导入
+
+如已持有本人的Cookie JSON或storageState，也可使用0600权限的私有文件：
+
+```sh
+npm run collection:plan -- --account=1 --auth=/你的私有目录/指数授权.json
+```
+
+替换账号编号与路径。Cookie JSON支持`cookie`及可选`userAgent`；所有凭据不提交Git或写入参数日志。登记文件只配置本账号，不自动请求指数。
 
 ## 筛选与数据
 
@@ -48,11 +51,13 @@ npm run collection:plan -- --account=1
 
 ## 本地API
 
-`GET /api/health`返回服务名称，用于确认连接的是`everyone-content`，不需要账号。其他账号请求须带`x-everyone-content-account`：
+`GET /api/initialization`返回服务名称、各账号初始化状态及授权是否已配置，不读取画像正文；`GET /api/health`只返回服务名称。这两个入口不需要账号，其他请求须带`x-everyone-content-account`：
 
 | API | 用途 |
 |---|---|
-| GET `/api/context` | 当前账号及生效画像版本 |
+| GET `/api/context` | 当前账号、画像版本及初始化状态 |
+| GET `/api/index-auth` | 当前账号登录状态，不返回凭据 |
+| POST `/api/index-auth/start`、`/cancel` | 打开或取消专用登录窗口 |
 | GET `/api/collection` | 任务、记录、额度及发现结果 |
 | GET / PUT `/api/collection/config` | 读取配置、保存规则并重筛 |
 | GET `/api/collection/records/:id`及`/raw` | 本账号解析或原始证据 |

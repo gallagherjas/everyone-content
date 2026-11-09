@@ -5,8 +5,12 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { account, InputError } from './accounts.ts';
+import { ensureInitialization, recordInitialization, initializationStatus } from './initialization.ts';
+import { profileCompletion } from './profile.ts';
+import { syncAgentInitialization } from './agent-state.ts';
 
 export const ROOT = fileURLToPath(new URL('..', import.meta.url));
+export const INSTRUCTIONS = process.env.EVERYONE_CONTENT_INSTRUCTIONS_PATH || join(ROOT, 'AGENTS.md');
 const configuredData = process.env.EVERYONE_CONTENT_DATA_DIR;
 export const DATA = configuredData ? resolve(configuredData) : join(ROOT, 'runtime');
 const REPO = process.env.EVERYONE_CONTENT_GIT_ROOT || ROOT;
@@ -78,12 +82,14 @@ export function ensureStrategy(db: DatabaseSync, id: number) {
   const a = account(db, id);
   if (a.strategy_sha) {
     if (!head(id)) git(['update-ref', ref(id), a.strategy_sha]);
-    releaseDir(a.strategy_sha);
+    const dir = releaseDir(a.strategy_sha);
+    ensureInitialization(db, id, a.strategy_sha, () => readFileSync(join(dir, 'account-profile.md'), 'utf8'));
     return a.strategy_sha;
   }
   const files = { 'account-profile.md': readFileSync(join(ROOT, 'prompts', 'account-profile.md'), 'utf8') };
   const sha = commit(id, files, `账号 ${id}：初始化策略`);
   db.prepare('UPDATE accounts SET strategy_sha=? WHERE id=?').run(sha, id);
+  recordInitialization(db, id, sha, files['account-profile.md']);
   db.prepare("INSERT INTO strategy_audit(account_id,action,sha,note) VALUES(?,'publish',?,?)").run(
     id,
     sha,
@@ -120,6 +126,7 @@ export function strategy(db: DatabaseSync, id: number) {
     base_sha: base,
     published: Object.fromEntries(names.map((n) => [n, files[n]])),
     draft: drafts,
+    initialization: initializationStatus(db, id),
     history,
   };
 }
@@ -152,6 +159,7 @@ function activate(db: DatabaseSync, id: number, files: Record<string, string>, n
   db.exec('BEGIN IMMEDIATE');
   try {
     db.prepare('UPDATE accounts SET strategy_sha=? WHERE id=?').run(sha, id);
+    recordInitialization(db, id, sha, files['account-profile.md']);
     db.prepare("INSERT INTO strategy_audit(account_id,action,sha,note) VALUES(?,'publish',?,?)").run(
       id || null,
       sha,
@@ -163,7 +171,7 @@ function activate(db: DatabaseSync, id: number, files: Record<string, string>, n
     throw e;
   }
   atomic(join(draftDir(id), 'base.txt'), sha);
-  return strategy(db, id);
+  return { ...strategy(db, id), instructions_synced: syncAgentInitialization(db, INSTRUCTIONS) };
 }
 export function publish(db: DatabaseSync, id: number, base: unknown, note: unknown) {
   checkBase(db, id, base);
@@ -184,6 +192,7 @@ export function rollback(db: DatabaseSync, id: number, sha: unknown, base: unkno
   db.exec('BEGIN IMMEDIATE');
   try {
     db.prepare('UPDATE accounts SET strategy_sha=? WHERE id=?').run(restored, id);
+    recordInitialization(db, id, restored, files['account-profile.md']);
     db.prepare("INSERT INTO strategy_audit(account_id,action,sha,note) VALUES(?,'rollback',?,?)").run(
       id || null,
       restored,
@@ -198,7 +207,7 @@ export function rollback(db: DatabaseSync, id: number, sha: unknown, base: unkno
   for (const [n, value] of Object.entries(files))
     if (n === 'account-profile.md') atomic(join(draftDir(id), n), value);
   atomic(join(draftDir(id), 'base.txt'), restored);
-  return strategy(db, id);
+  return { ...strategy(db, id), instructions_synced: syncAgentInitialization(db, INSTRUCTIONS) };
 }
 export function context(db: DatabaseSync, id: number, sha?: string | null) {
   const a = account(db, id);
@@ -206,5 +215,8 @@ export function context(db: DatabaseSync, id: number, sha?: string | null) {
   if (!db.prepare('SELECT 1 FROM strategy_audit WHERE account_id=? AND sha=?').get(id, version))
     throw new InputError('策略版本不属于当前账号', 404);
   const dir = releaseDir(version);
-  return { account_id: id, account_name: a.name, strategy_sha: version, strategy_dir: dir };
+  const state = version === account(db, id).strategy_sha
+    ? initializationStatus(db, id)
+    : profileCompletion(readFileSync(join(dir, 'account-profile.md'), 'utf8'));
+  return { account_id: id, account_name: a.name, strategy_sha: version, strategy_dir: dir, ...state };
 }
