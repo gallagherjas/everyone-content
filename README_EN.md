@@ -22,6 +22,9 @@ People running multiple content accounts face three scattered things: topic choi
 
 - **Collection with facts**: per-account keywords and filter rules pull topics, keyword videos, and creator boards from the Douyin Index, driving topic choices with real data instead of guesswork and vibes.
 - **Decisions with a profile**: each account maintains a seven-part profile (positioning, persona, audience, conversion, strategy, format, boundaries), checked item by item during topic review to keep every topic aligned with the account's positioning and goals.
+- **Writing in your style**: start by collecting at least 3 of your own scripts (300+ characters in total); drafts are generated from your writing preferences and keep improving as more of your own writing comes in. The gate exists for better drafts — so the style keeps getting closer to yours and stays free of the AI flavor.
+
+Tip: the agent never picks topics for you, because it leans too heavily on historical data and lacks creativity — this project reviews topics, it does not generate them. We also hope you become a genuinely creative person: some ideas may be inspired by others, but never just trust the AI!!
 
 ## How it works
 
