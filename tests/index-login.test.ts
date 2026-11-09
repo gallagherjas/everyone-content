@@ -26,8 +26,11 @@ test('匿名和其他域会话不保存，登录后凭据按账号私密落盘�
     assert.equal(state.status, 'configured'); assert.equal(state.configured, true);
     assert.ok(!JSON.stringify(state).includes(session.value));
     const path = String(db.prepare('SELECT auth_path FROM collection_credentials WHERE account_id=1').get()!.auth_path);
-    assert.equal(statSync(path).mode & 0o777, 0o600);
-    assert.equal(statSync(join(root, 'authorization', '1')).mode & 0o777, 0o700);
+    // Windows不支持POSIX权限位，与loadAuth的权限检查保持一致。
+    if (process.platform !== 'win32') {
+      assert.equal(statSync(path).mode & 0o777, 0o600);
+      assert.equal(statSync(join(root, 'authorization', '1')).mode & 0o777, 0o700);
+    }
     const saved = JSON.parse(readFileSync(path, 'utf8'));
     assert.equal(saved.cookie, 'sessionid=synthetic-test-session');
     assert.equal(db.prepare('SELECT COUNT(*) n FROM collection_requests').get()!.n, 0);
