@@ -7,6 +7,7 @@
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPLv3-blue.svg)](LICENSE)
 ![Node](https://img.shields.io/badge/node-%E2%89%A524-green)
 ![Local-first](https://img.shields.io/badge/data-local--first-orange)
+[![CI](https://github.com/gallagherjas/everyone-content/actions/workflows/ci.yml/badge.svg)](https://github.com/gallagherjas/everyone-content/actions/workflows/ci.yml)
 
 简体中文 | [English](README_EN.md)
 
@@ -46,7 +47,7 @@
 需要 **Node.js 24+**、**Git** 和一个能读取项目指令与本地Skill的Agent（Codex、Claude Code 等）。支持 macOS、Linux 与 Windows（CI 在两个平台运行）；指数扫码登录需要本机图形桌面。
 
 ```sh
-git clone <仓库地址>
+git clone https://github.com/gallagherjas/everyone-content.git
 cd everyone-content
 npm ci
 npm --prefix frontend ci

@@ -7,6 +7,7 @@
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPLv3-blue.svg)](LICENSE)
 ![Node](https://img.shields.io/badge/node-%E2%89%A524-green)
 ![Local-first](https://img.shields.io/badge/data-local--first-orange)
+[![CI](https://github.com/gallagherjas/everyone-content/actions/workflows/ci.yml/badge.svg)](https://github.com/gallagherjas/everyone-content/actions/workflows/ci.yml)
 
 [简体中文](README.md) | English
 
@@ -45,7 +46,7 @@ Key design:
 Requires **Node.js 24+**, **Git**, and an agent that can read project instructions and local skills. macOS, Linux, and Windows are supported (CI runs on both platforms); index QR login needs a local desktop.
 
 ```sh
-git clone <repository-url>
+git clone https://github.com/gallagherjas/everyone-content.git
 cd everyone-content
 npm ci
 npm --prefix frontend ci

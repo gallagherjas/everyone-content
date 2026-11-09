@@ -30,5 +30,9 @@
   "devDependencies": {
     "@types/node": "^24.19.2",
     "typescript": "^5.9.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gallagherjas/everyone-content.git"
   }
 }
