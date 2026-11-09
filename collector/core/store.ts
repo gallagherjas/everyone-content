@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import type { DatabaseSync } from 'node:sqlite';
 
@@ -25,7 +25,9 @@ export class CollectionStore {
     return {path,sha};
   }
   read(path: string,sha: string): string {
-    if(!resolve(path).startsWith(this.directory+'/objects/'))throw new Error('artifact_scope_mismatch');
+    // 用relative判断归属，路径分隔符在Windows上同样正确。
+    const inside=relative(join(this.directory,'objects'),resolve(path));
+    if(!inside||inside.startsWith('..')||isAbsolute(inside))throw new Error('artifact_scope_mismatch');
     const bytes=gunzipSync(readFileSync(path));if(hash(bytes)!==sha)throw new Error('artifact_checksum_mismatch');return bytes.toString('utf8');
   }
   data(run: any): any { return JSON.parse(this.read(run.data_path,run.data_sha)); }

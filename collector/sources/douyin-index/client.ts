@@ -16,7 +16,8 @@ export function loadAuth(file: string | undefined, env: Record<string, string | 
   else {
     if (!file) throw new Error('auth_required');
     const stat = statSync(file);
-    if (!stat.isFile() || (stat.mode & 0o077)) throw new Error('auth_file_must_be_private_0600');
+    // POSIX校验组/其他位；Windows的mode恒为0666/0444，权限由用户目录ACL保证，跳过位检查。
+    if (!stat.isFile() || (process.platform !== 'win32' && (stat.mode & 0o077))) throw new Error('auth_file_must_be_private_0600');
     auth = JSON.parse(readFileSync(file,'utf8'));
     if (Array.isArray(auth.cookies)) auth = authFromCookies(auth.cookies,auth.userAgent);
   }

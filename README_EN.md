@@ -42,7 +42,7 @@ Key design:
 
 ## Quick start
 
-Requires **Node.js 24+**, **Git**, and an agent that can read project instructions and local skills. macOS / Linux are fully supported; Windows is untested — the workbench runs, but CLI collection depends on `sh` (use Git Bash, or run `node collector/run.ts` directly), and skill discovery needs symlinks enabled (Developer Mode + `git config core.symlinks true`). Index QR login needs a local desktop.
+Requires **Node.js 24+**, **Git**, and an agent that can read project instructions and local skills. macOS, Linux, and Windows are supported (CI runs on both platforms); index QR login needs a local desktop.
 
 ```sh
 git clone <repository-url>

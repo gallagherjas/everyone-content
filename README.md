@@ -43,7 +43,7 @@
 
 ## 快速开始
 
-需要 **Node.js 24+**、**Git** 和一个能读取项目指令与本地Skill的Agent（Codex、Claude Code 等）。完整支持 macOS / Linux；Windows 未实测——工作台可运行，但命令行采集依赖`sh`（用 Git Bash，或直接`node collector/run.ts`），Skill发现需要符号链接（启用开发者模式并`git config core.symlinks true`）。指数扫码登录需要本机图形桌面。
+需要 **Node.js 24+**、**Git** 和一个能读取项目指令与本地Skill的Agent（Codex、Claude Code 等）。支持 macOS、Linux 与 Windows（CI 在两个平台运行）；指数扫码登录需要本机图形桌面。
 
 ```sh
 git clone <仓库地址>
@@ -93,7 +93,7 @@ Agent会引导完成账号画像的七个部分，之后进入日常使用。
 
 ## 参与贡献
 
-改动后运行与范围相称的验证：`npm test`（回归）、`npm run typecheck`、`npm run build:web`（前端）。Skill正文唯一维护在`skills/`，`.agents/skills/`只用相对链接注册。数据库时间UTC、界面时间北京时间，新增字段保持「未知即null」。提交PR前请保持测试全绿。
+改动后运行与范围相称的验证：`npm test`（回归）、`npm run typecheck`、`npm run build:web`（前端）。Skill正文唯一维护在`skills/`，`.agents/skills/`为同步副本（测试校验一致）。数据库时间UTC、界面时间北京时间，新增字段保持「未知即null」。提交PR前请保持测试全绿。
 
 ## 许可证
 

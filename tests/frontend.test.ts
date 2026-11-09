@@ -13,7 +13,9 @@ test('页面缓存保留分页、草稿和滚动位置，按需更新数据，�
   const { Window } = await import(pathToFileURL(require.resolve('happy-dom')).href);
   const { build } = require('esbuild');
   const dir = mkdtempSync(join(tmpdir(), 'everyone-frontend-'));
-  symlinkSync(join(frontend, 'node_modules'), join(dir, 'node_modules'), 'dir');
+  // Windows普通符号链接需要开发者模式，目录连接（junction）无需权限。
+  try { symlinkSync(join(frontend, 'node_modules'), join(dir, 'node_modules'), 'dir'); }
+  catch { symlinkSync(join(frontend, 'node_modules'), join(dir, 'node_modules'), 'junction'); }
   const bundle = await build({ entryPoints: [join(frontend, 'src/App.tsx')], bundle: true, write: false, platform: 'node', format: 'esm', packages: 'external', jsx: 'automatic' });
   const filename = join(dir, 'App.mjs'); writeFileSync(filename, bundle.outputFiles[0].text);
   const window = new Window({ url: 'http://127.0.0.1:8788/' });

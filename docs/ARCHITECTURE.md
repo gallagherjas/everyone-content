@@ -25,7 +25,7 @@ everyone-content由Node.js本地API、React界面、抖音指数采集程序和S
 - `db/`：表结构和空库初始化，只有空白默认账号及指数请求额度。
 - `server/`、`frontend/`：本地API、采集、已发布与设置页面。
 - `skills/`：初始化、选题评估与个人写作三个业务Skill及空白资料模板。
-- `.agents/skills/`：三个Skill的相对链接，供项目级发现。
+- `.agents/skills/`：三个Skill的同步真实副本（非符号链接，测试校验一致），Windows检出即可用。
 - `tests/`：合成数据回归及模拟DOM校验，使用临时数据库。
 
 ## 账号与画像

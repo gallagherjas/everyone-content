@@ -16,13 +16,13 @@
   },
   "scripts": {
     "db:init": "node db/init.ts",
-    "collect": "sh bin/collect.sh",
+    "collect": "node bin/collect.js",
     "web": "node server/index.ts",
     "dev:web": "npm --prefix frontend run dev",
     "build:web": "npm --prefix frontend run build",
     "test": "node --test tests/*.test.ts tests/collector/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "collection:plan": "sh bin/collect.sh --plan"
+    "collection:plan": "node bin/collect.js --plan"
   },
   "dependencies": {
     "playwright": "^1.65.0"

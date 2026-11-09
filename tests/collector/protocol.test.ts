@@ -39,6 +39,8 @@ test('直接HTTP使用固定源、只读白名单，不导出凭据；登录、�
 });
 test('登录文件权限必须私密，支持Cookie和外部storageState，不读取浏览器配置',()=>{
  const dir=mkdtempSync(join(tmpdir(),'dx-auth-')),file=join(dir,'auth.json');
- writeFileSync(file,JSON.stringify({cookie:'fixture-cookie'}),{mode:0o600});assert.equal(loadAuth(file,{}).cookie,'fixture-cookie');chmodSync(file,0o644);assert.throws(()=>loadAuth(file,{}),/0600/);
+ writeFileSync(file,JSON.stringify({cookie:'fixture-cookie'}),{mode:0o600});assert.equal(loadAuth(file,{}).cookie,'fixture-cookie');
+ // Windows的mode不区分组/其他位，0600位校验仅在POSIX上执行。
+ if(process.platform!=='win32'){chmodSync(file,0o644);assert.throws(()=>loadAuth(file,{}),/0600/);}
  writeFileSync(file,JSON.stringify({cookies:[{domain:'.douyin.com',name:'sessionid',value:'test-only',expires:-1},{domain:'other.test',name:'bad',value:'never-use'}]}));chmodSync(file,0o600);assert.equal(loadAuth(file,{}).cookie,'sessionid=test-only');
 });
