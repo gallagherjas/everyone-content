@@ -24,7 +24,7 @@ everyone-content由Node.js本地API、React界面、抖音指数采集程序和S
 - `lib/`：账号、画像版本、数据库、作品、时间及定时调度。
 - `db/`：表结构和空库初始化，只有空白默认账号及指数请求额度。
 - `server/`、`frontend/`：本地API、采集、已发布与设置页面。
-- `skills/`：初始化、选题评估、个人写作及空白资料模板。
+- `skills/`：初始化与选题评估两个业务Skill。
 - `.agents/skills/`：三个Skill的相对链接，供项目级发现。
 - `tests/`：合成数据回归及模拟DOM校验，使用临时数据库。
 
@@ -32,7 +32,7 @@ everyone-content由Node.js本地API、React界面、抖音指数采集程序和S
 
 配置、授权、订阅、任务归属及结果按账号隔离，API通过`x-everyone-content-account`核对对象归属。归档保留历史并阻止新增写入。指数授权按`account:<编号>`隔离，同词不代表可以借用其他账号的授权或响应。
 
-`account_initialization`缓存全部七个画像章节的完整性，绑定当前SHA和章节契约版本。生效与恢复画像时同步更新；`GET /api/initialization`仅查询SQLite，返回简短状态，不读取画像、Skill或个人原文。
+`account_initialization`缓存全部七个画像章节的完整性，绑定当前SHA和章节契约版本。生效与恢复画像时同步更新；`GET /api/initialization`仅查询SQLite，返回简短状态，不读取画像、Skill或其他资料。
 
 画像通过Git引用`refs/everyone-content/profiles/<account_id>`版本化，SQLite保存当前版本指针与审计记录。草稿位于`runtime/drafts/<account_id>/`，生效快照位于`runtime/releases/<sha>/`。保存画像不切分支或修改用户暂存区，恢复版本会生成新提交。
 
@@ -41,7 +41,7 @@ everyone-content由Node.js本地API、React界面、抖音指数采集程序和S
 Agent先看`AGENTS.md`固定区域的一句话状态并确认账号；仅在状态缺失或不匹配时查询轻量入口。`initialized=false`时才读取初始化Skill，逐项完成七个画像章节并保存生效；已完成时直接处理本次任务，不加载初始化流程。草稿不算完成，画像版本变化自动更新状态并同步`AGENTS.md`中的状态句。状态句只包含账号编号、完成标记及版本，不写入用户正文或凭据。
 
 指数登录独立于画像。用户点击连接后，Playwright创建专用临时浏览器会话，用户扫码完成页面验证后保存本账号Cookie和User-Agent，目录0700、文件0600。登录可取消或超时，数据库仅登记引用，不读取已有浏览器个人资料，不把凭据返回前端。未安装浏览器时按需准备，登录窗口需要图形桌面。实际指数权限在采集时校验。
-用户自行浏览和提出选题，评估Skill只核对明确问题。写作前需要用户提供本人的实质写作偏好或原文，Skill不内置通用写法。当前评估、稿件与偏好修订在对话中交付，没有个人写作资料登记或创作事件路由。
+用户自行浏览和提出选题，评估Skill只核对明确问题。评估在对话中交付，没有评估记录登记或创作事件路由。
 
 已发布作品可手动登记；只有指数实际收录同一作品时，才追加来源提供的指标快照。
 

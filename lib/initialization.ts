@@ -31,7 +31,7 @@ export function initializationStatus(db: DatabaseSync, id: number) {
   return completion(row);
 }
 
-// 日常入口仅查SQLite，不读取画像、Git、Skill、采集响应或个人原文。
+// 日常入口仅查SQLite，不读取画像、Git、Skill或采集响应。
 export function initializationOverview(db: DatabaseSync) {
   return { app: 'everyone-content', accounts: db.prepare(query + ' ORDER BY a.id').all().map(row => ({
     account_id: row.id, name: row.name, status: row.status, strategy_sha: row.strategy_sha,

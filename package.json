@@ -1,6 +1,6 @@
 {
   "name": "everyone-content",
-  "description": "本地优先的多账号内容运营工作台：抖音指数采集 + 账号画像 + Agent选题评估与写作",
+  "description": "本地优先的多账号内容运营工作台：抖音指数采集 + 账号画像 + Agent选题评估",
   "private": true,
   "license": "AGPL-3.0",
   "type": "module",
