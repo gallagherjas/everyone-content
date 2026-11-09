@@ -26,14 +26,3 @@ CREATE TABLE IF NOT EXISTS works (
   first_seen_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_works_status ON works(status);
-
--- 作品时序快照
-CREATE TABLE IF NOT EXISTS snapshots (
-  work_id  INTEGER NOT NULL REFERENCES works(id),
-  ts       TEXT NOT NULL DEFAULT (datetime('now')),
-  metrics  TEXT NOT NULL,                      -- JSON: {views,likes,comments,shares,collects}
-  source TEXT NOT NULL DEFAULT 'index',
-  capture_id INTEGER REFERENCES collection_runs(id),
-  metric_at TEXT,
-  PRIMARY KEY (work_id, ts)
-);

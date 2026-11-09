@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
 import { api, AccountContext, type Account } from "./api";
 import { Msg, PillTab } from "./components/Common";
-import BloggersPage from "./pages/Bloggers";
 import CollectionPage from "./pages/Collection";
 import SettingsPage from "./pages/Settings";
 import ContentsPage from "./pages/Contents";
 import { KeepAlive, PageCacheProvider } from "./components/PageCache";
-const TABS = [["collection", "采集"], ["bloggers", "博主"], ["contents", "已发布"], ["settings", "设置"]];
+const TABS = [["collection", "采集"], ["contents", "已发布"], ["settings", "设置"]];
 export default function App() {
   const [tab, setTab] = useState("collection"), [accounts, setAccounts] = useState<Account[]>([]);
   const [id, setId] = useState<number>(() => Number(localStorage.getItem("everyone-content-account")) || 1);
@@ -33,7 +32,6 @@ export default function App() {
     {error && <div className="mb-4"><Msg tone="error">{error}</Msg></div>}
     {current ? <AccountContext.Provider value={id}><PageCacheProvider key={id}><main>
       {current.status === "archived" && tab !== "settings" && <p className="mb-5 text-sm text-clay">当前账号已归档，可查看历史；恢复账号请进入设置。</p>}
-      <KeepAlive active={tab === "bloggers"}><BloggersPage /></KeepAlive>
       <KeepAlive active={tab === "collection"}><CollectionPage account={current} /></KeepAlive>
       <KeepAlive active={tab === "contents"}><ContentsPage archived={current.status === "archived"} /></KeepAlive>
       <KeepAlive active={tab === "settings"}><SettingsPage current={current} onUpdate={update} /></KeepAlive>

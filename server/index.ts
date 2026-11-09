@@ -14,7 +14,6 @@ import {
   sources,
   validateConfig,
   InputError,
-  linkWork,
   matchKeywords,
 } from '../lib/accounts.ts';
 import {
@@ -28,13 +27,12 @@ import {
   DATA,
   INSTRUCTIONS,
 } from '../lib/strategies.ts';
-import { authorId } from '../lib/douyin.ts';
 import { initializationOverview } from '../lib/initialization.ts';
 import { syncAgentInitialization } from '../lib/agent-state.ts';
 import { indexLogin } from '../lib/index-login.ts';
-import { CollectionStore, PROVIDERS, atomic } from '../collector/core/store.mjs';
-import { collectionStatus } from '../collector/core/status.mjs';
-import { planCollection } from '../collector/core/planner.mjs';
+import { CollectionStore, PROVIDERS, atomic } from '../collector/core/store.ts';
+import { collectionStatus } from '../collector/core/status.ts';
+import { planCollection } from '../collector/core/planner.ts';
 import { runScheduledCollection } from '../lib/collection-scheduler.ts';
 const PORT = Number(process.env.WEB_PORT ?? 8788),
   DIST = join(ROOT, 'frontend', 'dist');
@@ -305,139 +303,29 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
     }
     return json(res, { ok: true });
   }
-  if (path === '/api/authors' && method === 'GET') {
-    const followed = url.searchParams.get('scope') === 'bloggers';
-    const rows = db
-      .prepare(
-        followed ? `SELECT s.source_key,a.author_id sec_uid,COALESCE(NULLIF(a.name,''),s.name) name,a.follower_count,a.last_seen_at,
-      (SELECT COUNT(*) FROM account_works aw JOIN works w ON w.id=aw.work_id WHERE aw.account_id=? AND w.author_id=s.source_key AND w.platform=?) works
-      FROM account_sources s LEFT JOIN authors a ON a.author_id=s.source_key AND a.platform=?
-      WHERE s.account_id=? AND s.kind='blogger' ORDER BY a.follower_count DESC,s.id`
-        : `SELECT a.author_id sec_uid,a.name,a.follower_count,a.last_seen_at,
-      (SELECT COUNT(*) FROM account_works aw JOIN works w ON w.id=aw.work_id WHERE aw.account_id=? AND w.author_id=a.author_id AND w.platform=a.platform) works
-      FROM authors a WHERE EXISTS(SELECT 1 FROM account_works aw JOIN works w ON w.id=aw.work_id WHERE aw.account_id=? AND w.author_id=a.author_id AND w.platform=a.platform)
-      OR EXISTS(SELECT 1 FROM account_sources s WHERE s.account_id=? AND s.kind='blogger' AND s.source_key=a.author_id)
-      ORDER BY a.follower_count DESC`,
-      )
-      .all(...(followed ? [id, a.platform, a.platform, id] : [id, id, id])) as Record<string, any>[];
-    return json(
-      res,
-      rows.map((r) => ({ ...r, name: r.name || '未知', follower_count: r.follower_count ?? null })),
-    );
-  }
-  if (path === '/api/works' && method === 'GET') {
-    const p = page(url),
-      author = url.searchParams.get('author'),
-      blogger = url.searchParams.get('blogger'),
-      status = url.searchParams.get('status');
-    const conds = ['aw.account_id=?'],
-      args: (string | number)[] = [id];
-    if (url.searchParams.get('scope') === 'bloggers' || blogger !== null) {
-      conds.push('w.platform=?'); args.push(a.platform);
-      conds.push(`EXISTS(SELECT 1 FROM account_sources s WHERE s.account_id=aw.account_id AND s.kind='blogger'
-        AND s.source_key=w.author_id${blogger !== null ? ' AND s.source_key=?' : ''})`);
-      if (blogger !== null) args.push(blogger);
-    }
-    if (author) {
-      conds.push('a.name=?');
-      args.push(author);
-    }
-    if (status === 'gone') conds.push("w.status='gone'");
-    const from = `FROM account_works aw JOIN works w ON w.id=aw.work_id LEFT JOIN authors a ON a.author_id=w.author_id AND a.platform=w.platform WHERE ${conds.join(' AND ')}`;
-    const total = (db.prepare(`SELECT COUNT(*) n ${from}`).get(...args) as { n: number }).n;
-    const order = 'w.published_at DESC,w.id DESC';
-    const rows = db
-      .prepare(
-        `SELECT w.*,a.name author,${latest} latest,${prev} prev ${from}
-      ORDER BY ${order} LIMIT 20 OFFSET ?`,
-      )
-      .all(...args, (p - 1) * 20) as Record<string, any>[];
-    return json(res, {
-      total,
-      page: p,
-      items: rows.map((r) => {
-        const metrics = visibleMetrics(r.latest || '{}');
-        return {
-          ...r,
-          author: r.author || '',
-          metrics,
-          engagement: engagement(metrics),
-          growth: r.prev ? engagement(metrics) - engagement(JSON.parse(r.prev)) : null,
-        };
-      }),
-    });
-  }
-  const workDetail = path.match(/^\/api\/works\/(\d+)$/);
-  if (workDetail && method === 'GET') {
-    const w = db
-      .prepare(
-        `SELECT w.* FROM works w JOIN account_works aw ON aw.work_id=w.id WHERE w.id=? AND aw.account_id=?`,
-      )
-      .get(Number(workDetail[1]), id);
-    if (!w) throw new InputError('作品不属于当前账号', 404);
-    const snaps = db
-      .prepare('SELECT ts,metrics FROM snapshots WHERE work_id=? ORDER BY ts')
-      .all(Number(workDetail[1])) as { ts: string; metrics: string }[];
-    return json(res, {
-      ...w,
-      series: snaps.map((s) => ({
-        ts: s.ts,
-        ...visibleMetrics(s.metrics),
-        engagement: engagement(JSON.parse(s.metrics)),
-      })),
-    });
-  }
   if (path === '/api/sources' && method === 'GET') {
     const all = sources(db, id);
     return json(res, {
       config: a.config,
-      bloggers: all
-        .filter((s) => s.kind === 'blogger')
-        .map((s) => ({
-          ...s,
-          sec_uid: s.source_key.startsWith('MS4w') ? s.source_key : undefined,
-          profile_url: s.source_key.startsWith('http') ? s.source_key : undefined,
-        })),
       keywords: all.filter((s) => s.kind === 'keyword'),
     });
   }
-  if (['/api/bloggers', '/api/keywords'].includes(path) && method === 'POST') {
+  if (path === '/api/keywords' && method === 'POST') {
     const b = await body(req),
-      kind = path.endsWith('bloggers') ? 'blogger' : 'keyword';
-    let sourceKey: string, name: string;
-    if (kind === 'blogger') {
-      const url = text(b.url, '博主链接', 2000);
-      if (!/MS4wLj[A-Za-z0-9_-]+/.test(url)) profile(url);
-      const parsed = authorId(url);
-      if (!parsed) throw new InputError('请粘贴完整抖音主页链接，短链接不支持本地解析');
-      sourceKey = parsed;
-      const known = db
-        .prepare("SELECT name FROM authors WHERE platform='douyin' AND author_id=?")
-        .get(sourceKey) as { name: string } | undefined;
-      name = (b.name ? text(b.name, '博主名称', 100) : known?.name) || sourceKey.slice(0, 12);
-    } else {
-      sourceKey = text(b.keyword, '关键词', 80);
+      sourceKey = text(b.keyword, '关键词', 80),
       name = sourceKey;
-      if (!sourceKey) throw new InputError('关键词不能为空');
-    }
-    if (sources(db, id).some((s) => s.kind === kind && s.source_key === sourceKey))
+    if (!sourceKey) throw new InputError('关键词不能为空');
+    if (sources(db, id).some((s) => s.kind === 'keyword' && s.source_key === sourceKey))
       throw new InputError('该账号已添加此采集源', 409);
     db.prepare('INSERT INTO account_sources(account_id,kind,source_key,name,note) VALUES(?,?,?,?,?)').run(
       id,
-      kind,
+      'keyword',
       sourceKey,
       name,
       b.note ? text(b.note, '备注', 1000) : '',
     );
-    let message = '已加入本账号；公共历史数据已关联。';
-    if (kind === 'blogger') {
-      const cached = db
-        .prepare("SELECT id FROM works WHERE platform='douyin' AND author_id=?")
-        .all(sourceKey) as { id: number }[];
-      for (const w of cached) linkWork(db, id, w.id, `blogger:${name}`);
-      message += '仅展示指数采集已收录的作品，不单独请求博主新作。';
-    } else matchKeywords(db, a);
-    return json(res, { ok: true, name, message }, 201);
+    matchKeywords(db, a);
+    return json(res, { ok: true, name, message: '已加入本账号；公共历史数据已关联。' }, 201);
   }
   const source = path.match(/^\/api\/sources\/(\d+)$/);
   if (source && ['PUT', 'DELETE'].includes(method || '')) {

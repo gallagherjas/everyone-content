@@ -43,10 +43,8 @@ test('页面缓存保留分页、草稿和滚动位置，按需更新数据，�
     let data;
     if (url.pathname === '/api/accounts') data = accounts;
     else if (url.pathname === '/api/collection') data = { tasks: [], runs, budgets: [], indexCredential: false, discovery: null };
-    else if (url.pathname === '/api/authors') data = [{ source_key: 'MS4wTEST', sec_uid: 'MS4wTEST', name: '测试博主', follower_count: 100, last_seen_at: null, works: 45 }];
-    else if (url.pathname === '/api/works') data = { total: 45, items: [{ id: 1, url: 'https://www.douyin.com/video/1', title: `账号${account}第${url.searchParams.get('page')}页作品`, author: '测试博主', status: 'live', metrics: {}, engagement: 100, growth: null, published_at: null }] };
-    else if (url.pathname === '/api/contents') data = [];
-    else if (url.pathname === '/api/sources') data = { bloggers: [], keywords: [] };
+    else if (url.pathname === '/api/contents') data = Array.from({ length: 25 }, (_, n) => ({ id: account * 1000 + n + 1, published_url: `https://www.douyin.com/video/${account}-${n + 1}`, published_at: '2026-11-09 04:00:00', metrics: null }));
+    else if (url.pathname === '/api/sources') data = { keywords: [] };
     else if (url.pathname === '/api/index-auth') data = { status: 'missing', configured: false, message: '尚未连接抖音指数。' };
     else if (url.pathname === '/api/collection/config') data = accounts.find(value => value.id === account);
     else if (url.pathname === '/api/strategy') data = { sha: 'a'.repeat(40), base_sha: 'a'.repeat(40), draft: { 'account-profile.md': '初始画像' }, published: {}, history: [] };
@@ -82,49 +80,41 @@ test('页面缓存保留分页、草稿和滚动位置，按需更新数据，�
   });
   try {
     await act(async () => { root.render(createElement(StrictMode, null, createElement(App))); });
-    assert.equal(count('/api/collection'), 1); assert.equal(count('/api/works'), 0); assert.equal(count('/api/contents'), 0);
+    assert.equal(count('/api/collection'), 1); assert.equal(count('/api/contents'), 0);
     assert.equal(timers.size, 1);
-    await navigate('博主'); assert.equal(timers.size, 0);
-    assert.equal(requests.filter(request => request.url.pathname === '/api/authors').at(-1).url.searchParams.get('scope'), 'bloggers');
-    assert.equal(requests.filter(request => request.url.pathname === '/api/works').at(-1).url.searchParams.get('scope'), 'bloggers');
-    await click('测试博主'); await click('下一页 ›');
-    const works = count('/api/works'); assert.equal(works, 3);
+    await navigate('已发布'); assert.equal(timers.size, 0);
+    const contents = count('/api/contents'); assert.equal(contents, 1);
+    await click('下一页 ›'); // 25条、每页20条，翻到第2页
+    assert.match(window.document.body.textContent, /作品 #1022/);
     window.scrollTo(0, 420);
-    await navigate('已发布'); assert.equal(scroll, 0);
-    await edit(field('已发布作品链接'), 'https://www.douyin.com/video/123');
-    window.scrollTo(0, 260);
     await navigate('设置'); await click('采集设置');
     const limit = visible('input[type="number"]')[0]; await edit(limit, '3');
     const configLoads = count('/api/collection/config');
     await click('账号画像'); await edit(field('账号画像正文'), '尚未保存的画像');
     await click('采集设置'); assert.equal(visible('input[type="number"]')[0].value, '3');
     assert.equal(count('/api/collection/config'), configLoads);
-    await navigate('博主'); assert.equal(count('/api/works'), works); assert.equal(scroll, 420);
-    assert.match(visible('table')[0].textContent, /账号1第2页作品/);
-    await navigate('已发布'); assert.equal(field('已发布作品链接').value, 'https://www.douyin.com/video/123'); assert.equal(scroll, 260);
-    assert.equal(count('/api/contents'), 1);
+    await navigate('已发布'); assert.equal(count('/api/contents'), contents); assert.equal(scroll, 420);
+    assert.match(window.document.body.textContent, /作品 #1022/); // 分页保留
+    await edit(field('已发布作品链接'), 'https://www.douyin.com/video/123');
+    window.scrollTo(0, 260);
     await navigate('设置'); await click('账号画像'); assert.equal(field('账号画像正文').value, '尚未保存的画像');
-    await click('博主与关键词'); await edit(field('新增关键词'), '新关键词'); await click('添加');
+    await click('关键词'); await edit(field('新增关键词'), '新关键词'); await click('添加');
     assert.equal(requests.filter(request => request.method === 'POST').length, 1);
-    assert.equal(count('/api/works'), works); // Hidden views do not fetch until needed.
-    await navigate('博主'); assert.equal(count('/api/works'), works + 1);
-    assert.match(visible('table')[0].textContent, /账号1第2页作品/);
-    const lastQuery = requests.filter(request => request.url.pathname === '/api/works').at(-1).url;
-    assert.equal(lastQuery.searchParams.get('scope'), 'bloggers');
-    assert.equal(lastQuery.searchParams.get('blogger'), 'MS4wTEST');
-    await navigate('博主'); assert.equal(count('/api/works'), works + 1);
-    await navigate('设置'); await click('采集设置'); assert.equal(visible('input[type="number"]')[0].value, '3');
-    await navigate('采集'); assert.equal(timers.size, 1);
-    const collectionLoads = count('/api/collection');
-    await navigate('博主'); await navigate('采集'); assert.equal(count('/api/collection'), collectionLoads);
-    runs.push({ id: 1, provider: 'index', operation: 'videos', target: '1', status: 'ok', observed_at: '2026-11-09 04:00:00', version: null, error: null });
-    await act(async () => { [...timers.values()][0](); });
-    const beforeChange = count('/api/works'); await navigate('博主'); assert.equal(count('/api/works'), beforeChange + 1);
-    await navigate('已发布'); await switchAccount(2);
+    assert.equal(count('/api/contents'), contents); // Hidden views do not fetch until needed.
+    await navigate('已发布'); assert.equal(count('/api/contents'), contents + 1); // POST后缓存失效，重新加载
+    assert.equal(field('已发布作品链接').value, 'https://www.douyin.com/video/123'); assert.equal(scroll, 260);
+    await switchAccount(2);
     assert.equal(field('已发布作品链接').value, '');
+    assert.match(window.document.body.textContent, /作品 #2001/); // 新账号从第1页展示自己的登记
     assert.equal(requests.filter(request => request.url.pathname === '/api/contents').at(-1).account, 2);
     await switchAccount(1); assert.equal(field('已发布作品链接').value, '');
     assert.equal(timers.size, 0);
+    await navigate('采集'); assert.equal(timers.size, 1);
+    const collectionLoads = count('/api/collection');
+    await navigate('已发布'); await navigate('采集'); assert.equal(count('/api/collection'), collectionLoads);
+    runs.push({ id: 1, provider: 'index', operation: 'videos', target: '1', status: 'ok', observed_at: '2026-11-09 04:00:00', version: null, error: null });
+    await act(async () => { [...timers.values()][0](); });
+    assert.equal(count('/api/collection'), collectionLoads + 1); // 轮询发现新记录后重新加载
   } finally {
     await act(async () => { root.unmount(); });
     for (const [key, descriptor] of originals) {

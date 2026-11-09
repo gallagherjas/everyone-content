@@ -1,18 +1,20 @@
-import { atomic,hash } from './store.mjs';
-import { rebuildAccount } from './projection.mjs';
+import type { DatabaseSync } from 'node:sqlite';
+import { atomic,hash, type CollectionStore } from './store.ts';
+import { rebuildAccount } from './projection.ts';
 
 const DAY=86400000;
-export function collectionAccounts(db,{accountIds,scheduled=false}={}) {
-  return db.prepare("SELECT * FROM accounts WHERE status='active' ORDER BY id").all().map(a=>({...a,config:JSON.parse(a.config)}))
+export interface PlanOptions { accountIds?: number[]; scheduled?: boolean; now?: number }
+export function collectionAccounts(db: DatabaseSync,{accountIds,scheduled=false}:{accountIds?: number[];scheduled?: boolean}={}): any[] {
+  return (db.prepare("SELECT * FROM accounts WHERE status='active' ORDER BY id").all() as any[]).map(a=>({...a,config:JSON.parse(a.config)}))
     .filter(a=>(!accountIds||accountIds.includes(a.id))&&(!scheduled||a.config.schedules.index.enabled))
     .map(a=>({...a,configSha:hash({index:a.config.index,strategy:a.strategy_sha})}));
 }
-export function planCollection(store,options={}) {
+export function planCollection(store: CollectionStore,options: PlanOptions={}): any[] {
   const db=store.db,now=options.now??Date.now(),accounts=collectionAccounts(db,options);
   atomic(db,()=>{
     for(const a of accounts) {
       db.prepare('DELETE FROM collection_task_accounts WHERE account_id=?').run(a.id);
-      const cred=db.prepare('SELECT * FROM collection_credentials WHERE account_id=?').get(a.id);
+      const cred=db.prepare('SELECT * FROM collection_credentials WHERE account_id=?').get(a.id) as any;
       if(!cred)continue;
       const discovery=rebuildAccount(store,a);
       const datesRun=store.latest(store.queue('index',cred.scope,{type:'topic_dates'},[a],{interval:DAY,priority:100}).key);

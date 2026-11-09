@@ -4,17 +4,16 @@ import { mkdtempSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createCipheriv } from 'node:crypto';
-import { decode, parseJson, PATHS, requestFor, unwrap, validateData, semanticHash } from '../../collector/sources/douyin-index/protocol.mjs';
-import { ReadClient, loadAuth } from '../../collector/sources/douyin-index/client.mjs';
+import { decode, parseJson, PATHS, requestFor, unwrap, validateData, semanticHash } from '../../collector/sources/douyin-index/protocol.ts';
+import { ReadClient, loadAuth } from '../../collector/sources/douyin-index/client.ts';
 
-const dates={topic:{valid_day:'20261105',valid_week:'20261101'},author:{datetime:'20261104'}};
-test('官方周窗口与达人日期分开；阻止任意URL与非法ID',()=>{
+const dates={topic:{valid_day:'20261105',valid_week:'20261101'}};
+test('官方周窗口正确生成；阻止任意URL与非法ID',()=>{
  assert.deepEqual(requestFor({type:'topic_relation',id:'123'},dates).payload,{app_name:'aweme',topic_ids:['123'],begin_date:'20261026',end_date:'20261101'});
- assert.equal(requestFor({type:'author_works',id:'abc'},dates).payload.start_date,'20261006');
  assert.equal(requestFor({type:'videos',keyword:'企业AI'},dates).payload.labelType,0);
  assert.deepEqual(requestFor({type:'topic_search',keyword:'企业AI'},dates).payload.param,{app_name:'aweme',keyword:'企业AI',start_date:'20261007',end_date:'20261105'});
  assert.throws(()=>requestFor({type:'https://evil.test'},dates),/not_allowed/);
- assert.throws(()=>requestFor({type:'topic_trend',id:'not-numeric'},dates),/topic_id/);
+ assert.throws(()=>requestFor({type:'topic_relation',id:'not-numeric'},dates),/topic_id/);
 });
 test('保留19位ID；解密官方模式2；只有BaseResp不冒充关联数据',()=>{
  assert.equal(parseJson('{"id":9000000000000000001}').id,'9000000000000000001');
@@ -28,8 +27,6 @@ test('媒体签名、排名、顺序不产生新内容变化；真实指标变�
  const b={data:[{itemId:'2',url:'signed3'},{itemId:'1',url:'signed4',likes:9}]};
  assert.equal(semanticHash('videos',a),semanticHash('videos',b));
  b.data.push({itemId:'3'});assert.notEqual(semanticHash('videos',a),semanticHash('videos',b));
- assert.equal(semanticHash('author_core',{fans_info:{x:1,y:2}}),semanticHash('author_core',{fans_info:{y:2,x:1}}));
- assert.notEqual(semanticHash('author_core',{fans_info:{x:1}}),semanticHash('author_core',{fans_info:{x:2}}));
 });
 test('直接HTTP使用固定源、只读白名单，不导出凭据；登录、限流、业务错误停止',async()=>{
  let init;const task={type:'videos',keyword:'AI创业'},req=requestFor(task,dates);

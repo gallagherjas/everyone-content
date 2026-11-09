@@ -10,11 +10,11 @@ process.env.EVERYONE_CONTENT_GIT_ROOT=root;process.env.EVERYONE_CONTENT_DATA_DIR
 execFileSync('git',['init','-q',root]);after(()=>rmSync(root,{recursive:true,force:true}));
 const {migrate}=await import('../db/migrate.ts');
 const {createAccount}=await import('../lib/accounts.ts');
-const {CollectionStore,hash}=await import('../collector/core/store.mjs');
-const {runCollection}=await import('../collector/core/runner.mjs');
-const {planCollection}=await import('../collector/core/planner.mjs');
-const {registerAuth,configureIndex}=await import('../collector/core/settings.mjs');
-const {collectionStatus}=await import('../collector/core/status.mjs');
+const {CollectionStore,hash}=await import('../collector/core/store.ts');
+const {runCollection}=await import('../collector/core/runner.ts');
+const {planCollection}=await import('../collector/core/planner.ts');
+const {registerAuth,configureIndex}=await import('../collector/core/settings.ts');
+const {collectionStatus}=await import('../collector/core/status.ts');
 const {defaultSchedules}=await import('../lib/collection-schedule.ts');
 const DAY=86400000,HOUR=3600000,base=Date.UTC(2026,10,7,2);
 function setup(){const db=new DatabaseSync(':memory:');migrate(db,':memory:');db.prepare('DELETE FROM account_sources').run();db.prepare('UPDATE collection_limits SET interval_ms=0').run();return {db,store:new CollectionStore(db,join(root,hash(Math.random()))) };}
@@ -191,9 +191,9 @@ test('指数按30天门槛前三生成关联任务，筛后入库并保留可用
   assert.equal(db.prepare('SELECT COUNT(*) n FROM account_works WHERE account_id=1 AND work_id=9999').get().n,1);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM works WHERE url LIKE '%/105'").get().n,0);
   assert.equal(db.prepare("SELECT published_at FROM works WHERE url LIKE '%/101'").get().published_at,'2026-11-06 02:00:00');
-  const snap=db.prepare("SELECT s.* FROM snapshots s JOIN works w ON w.id=s.work_id WHERE w.url LIKE '%/101'").get();
+  const obs=db.prepare("SELECT * FROM collection_observations WHERE kind='work' AND object_id=(SELECT id FROM works WHERE url LIKE '%/101')").get();
   assert.equal(db.prepare('SELECT COUNT(*) n FROM content_snapshots').get().n,1);
-  assert.equal(snap.source,'index:videos');assert.equal(JSON.parse(snap.metrics).likes,100);assert.equal(JSON.parse(snap.metrics).views,null);assert.equal(snap.metric_at,'2026-11-05 00:00:00');
+  assert.equal(obs.dimension,'videos');assert.equal(obs.effective_at,'20261105');assert.equal(JSON.parse(obs.metrics).likes,100);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM collection_author_ids WHERE external_id='900'").get().n,0);
   const view=collectionStatus(db,account(db,1),store).discovery;
   assert.equal(view.videos[0].fans,1200);assert.equal(view.topics.length,3);

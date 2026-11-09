@@ -7,10 +7,10 @@ import { randomUUID } from 'node:crypto';
 import { activeAccount, InputError } from './accounts.ts';
 import { openDb } from './db.ts';
 import { DATA } from './strategies.ts';
-import { CollectionStore } from '../collector/core/store.mjs';
-import { registerAuth } from '../collector/core/settings.mjs';
-import { authFromCookies, loadAuth } from '../collector/sources/douyin-index/client.mjs';
-import { ORIGIN } from '../collector/sources/douyin-index/protocol.mjs';
+import { CollectionStore } from '../collector/core/store.ts';
+import { registerAuth } from '../collector/core/settings.ts';
+import { authFromCookies, loadAuth } from '../collector/sources/douyin-index/client.ts';
+import { ORIGIN } from '../collector/sources/douyin-index/protocol.ts';
 
 const LOGIN_URL = ORIGIN + '/creator-micro/creator-count/arithmetic-index';
 const running = (status: string) => status === 'preparing' || status === 'waiting';

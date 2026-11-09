@@ -28,7 +28,7 @@ test('首次安装只有空白账号和指数额度；再次开库保留用户�
     assert.equal(accounts[0].name, '默认账号');
     assert.equal(accounts[0].strategy_sha, null);
     assert.deepEqual(JSON.parse(accounts[0].config as string), DEFAULT_CONFIG);
-    for (const table of ['works', 'authors', 'snapshots', 'account_sources', 'collection_credentials', 'collection_tasks', 'collection_runs', 'collection_requests', 'contents'])
+    for (const table of ['works', 'authors', 'account_sources', 'collection_credentials', 'collection_tasks', 'collection_runs', 'collection_requests', 'contents'])
       assert.equal(db.prepare(`SELECT COUNT(*) n FROM ${table}`).get()!.n, 0, table);
     assert.deepEqual(db.prepare('SELECT provider FROM collection_limits').all().map(row => row.provider), ['index']);
     const other = createAccount(db, '第二个账号');
@@ -41,7 +41,23 @@ test('首次安装只有空白账号和指数额度；再次开库保留用户�
   } finally { db.close(); }
 });
 
-test('账号隔离、画像生效、指数配置与发布登记可通过本地API完成，保存博主不触发网络采集', async () => {
+test('v2数据库升级v3：移除博主采集源与作品快照表，关键词保留', () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    db.exec(`CREATE TABLE accounts (id INTEGER PRIMARY KEY, name TEXT NOT NULL, platform TEXT NOT NULL DEFAULT 'douyin', profile_url TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', config TEXT NOT NULL, strategy_sha TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+      CREATE TABLE account_sources (id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL REFERENCES accounts(id), kind TEXT NOT NULL CHECK(kind IN ('blogger','keyword')), source_key TEXT NOT NULL, name TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'ready', note TEXT NOT NULL DEFAULT '', UNIQUE(account_id, kind, source_key));
+      CREATE TABLE snapshots (work_id INTEGER NOT NULL, ts TEXT NOT NULL, metrics TEXT NOT NULL, source TEXT NOT NULL, capture_id INTEGER, metric_at TEXT, PRIMARY KEY (work_id, ts));
+      INSERT INTO accounts(id,name,config) VALUES(1,'默认账号','{}');
+      INSERT INTO account_sources(account_id,kind,source_key,name) VALUES(1,'blogger','MS4wLjAB','参考'),(1,'keyword','效率工具','效率工具');
+      PRAGMA user_version=2;`);
+    migrate(db, ':memory:');
+    assert.deepEqual(db.prepare('SELECT source_key FROM account_sources').all().map(row => row.source_key), ['效率工具']);
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE name='snapshots'").get()!.n, 0);
+    assert.throws(() => db.prepare("INSERT INTO account_sources(account_id,kind,source_key,name) VALUES(1,'blogger','x','x')").run(), /CHECK/);
+  } finally { db.close(); }
+});
+
+test('账号隔离、画像生效、指数配置与发布登记可通过本地API完成', async () => {
   const reserve = createServer(); reserve.listen(0, '127.0.0.1'); await once(reserve, 'listening');
   const port = (reserve.address() as { port: number }).port;
   await new Promise<void>(resolve => reserve.close(() => resolve()));
@@ -91,8 +107,6 @@ test('账号隔离、画像生效、指数配置与发布登记可通过本地AP
     await request('/api/collection/config', second.id, 'PUT', { index: rules });
     assert.deepEqual((await request('/api/sources', first.id)).keywords, []);
     assert.equal((await request('/api/sources', second.id)).keywords[0].name, '阳台种花');
-    await request('/api/bloggers', second.id, 'POST', { url: 'https://www.douyin.com/user/MS4wLjABTEST', name: '参考博主' }, 201);
-    await request('/api/bloggers', second.id, 'POST', { url: 'https://v.douyin.com/short' }, 400);
     const collection = await request('/api/collection', second.id);
     assert.equal(collection.indexCredential, false);
     assert.equal(collection.discovery, null);
@@ -109,7 +123,6 @@ test('账号隔离、画像生效、指数配置与发布登记可通过本地AP
     await request('/api/contents', second.id, 'POST', { published_url: 'https://www.douyin.com/video/9000000000000000001', published_at: '2020-01-01T10:00:00+08:00' }, 201);
     assert.equal((await request('/api/contents', second.id))[0].metrics, null);
     assert.deepEqual(await request('/api/contents', first.id), []);
-    assert.equal((await request('/api/works', second.id)).total, 0);
     await request(`/api/accounts/${second.id}`, second.id, 'PUT', { status: 'archived' });
     await request('/api/keywords', second.id, 'POST', { keyword: '归档后不得写入' }, 409);
     await request('/api/index-auth/cancel', second.id, 'POST');

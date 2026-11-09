@@ -20,7 +20,7 @@ export default function CollectionPage({account}:{account:Account}) {
   const load=useCallback(()=>api<State>("/api/collection").then(value=>{
     setState(value);
     const runs=value.runs.map(run=>`${run.id}:${run.status}`).join(',');
-    if(lastRuns.current!==null&&lastRuns.current!==runs)invalidate(['bloggers','contents','sources']);
+    if(lastRuns.current!==null&&lastRuns.current!==runs)invalidate(['contents','sources']);
     lastRuns.current=runs;
   }),[api,invalidate]);
   const refresh=useCallback(()=>{load().catch(e=>setMessage(String(e)));},[load]);

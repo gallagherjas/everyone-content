@@ -1,17 +1,17 @@
 import { openDb } from "../lib/db.ts";
 import { DATA } from "../lib/strategies.ts";
 import { lock,withTask } from "../lib/tasks.ts";
-import { CollectionStore,PROVIDERS } from "./core/store.mjs";
-import { planCollection,collectionAccounts } from "./core/planner.mjs";
-import { runCollection } from "./core/runner.mjs";
-import { registerAuth,configureIndex } from "./core/settings.mjs";
+import { CollectionStore,PROVIDERS } from "./core/store.ts";
+import { planCollection,collectionAccounts } from "./core/planner.ts";
+import { runCollection } from "./core/runner.ts";
+import { registerAuth,configureIndex } from "./core/settings.ts";
 
 const args = Object.fromEntries(process.argv.slice(2).map((arg) => { const [key,...value]=arg.replace(/^--/, "").split("="); return [key,value.join("=")||true]; }));
 const db=openDb();
 let unlock: (()=>void)|undefined;
 try {
   if(Object.keys(args).some(k=>!["account","scheduled","only","plan","config","auth","limit"].includes(k)))throw new Error("未知采集参数");
-  if(args.only&&!PROVIDERS.includes(args.only))throw new Error("未知采集来源");
+  if(args.only&&!PROVIDERS.includes(args.only as string))throw new Error("未知采集来源");
   const id=Number(args.account), options={...(id?{accountIds:[id]}:{}),scheduled:!!args.scheduled,...(typeof args.only==="string"?{only:args.only}:{}),...(args.limit?{requestLimit:Number(args.limit)}:{})};
   if(args.account&&(!Number.isSafeInteger(id)||id<1))throw new Error("账号编号无效");
   if(args.limit&&(!Number.isSafeInteger(options.requestLimit)||Number(options.requestLimit)<1))throw new Error("未知或无效的请求上限");

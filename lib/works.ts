@@ -14,13 +14,6 @@ export const sqlTime = (d: Date) => d.toISOString().replace("T", " ").slice(0, 1
 
 export const workUrl = (id: string) => `https://www.douyin.com/video/${id}`;
 
-export interface Capture { id: number; observed_at: string; source: string; metric_at?: string | null }
-export function snapshot(db: DatabaseSync, workId: number, metrics: DouyinWork["metrics"], capture?: Capture) {
-  if (capture && db.prepare("SELECT 1 FROM snapshots WHERE work_id=? AND capture_id=?").get(workId, capture.id)) return;
-  db.prepare("INSERT OR IGNORE INTO snapshots (work_id, ts, metrics,source,capture_id,metric_at) VALUES (?, ?, ?,?,?,?)")
-    .run(workId, capture?.observed_at ?? sqlTime(new Date()), JSON.stringify(metrics), capture?.source ?? "index", capture?.id ?? null, capture?.metric_at ?? capture?.observed_at ?? null);
-}
-
 export function upsertAuthor(db: DatabaseSync, w: DouyinWork) {
   if (!w.authorId) return;
   db.prepare(
@@ -29,13 +22,11 @@ export function upsertAuthor(db: DatabaseSync, w: DouyinWork) {
   ).run(w.authorId, w.authorName || null);
 }
 
-export function upsertWork(db: DatabaseSync, w: DouyinWork, reason: string, capture?: Capture, saveMetrics = true): number {
+export function upsertWork(db: DatabaseSync, w: DouyinWork, reason: string): number {
   const date = Date.parse(w.publishedAt), pub = Number.isFinite(date) ? sqlTime(new Date(date)) : null;
   const row = db.prepare(`INSERT INTO works(platform,author_id,url,title,published_at,reason) VALUES('douyin',?,?,?,?,?)
     ON CONFLICT(url) DO UPDATE SET author_id=COALESCE(excluded.author_id,works.author_id),
     title=CASE WHEN excluded.title<>'' THEN excluded.title ELSE works.title END,published_at=COALESCE(excluded.published_at,works.published_at)
     RETURNING id`).get(w.authorId || null, workUrl(w.id), w.title, pub, reason) as { id: number };
-  const id = Number(row.id);
-  if (saveMetrics && Object.values(w.metrics).some((v) => typeof v === "number" && Number.isFinite(v))) snapshot(db, id, w.metrics, capture);
-  return id;
+  return Number(row.id);
 }

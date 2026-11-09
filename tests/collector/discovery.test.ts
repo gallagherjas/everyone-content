@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Discovery,collectionPolicy,normalize} from '../../collector/core/discovery.mjs';
+import {Discovery,collectionPolicy,normalize} from '../../collector/core/discovery.ts';
 const policy={excludeKeywords:['AIGC','抽象','搞笑','猫咪','AI短剧']};
 const window={begin:'20261007',end:'20261105',days:30};
 function add(d,type,data,id=1,extra={}){d.ingest({type,data,run:{id,version:'20261105',observed_at:'2026-11-07 02:00:00'},window:type==='topic_search'?window:{end:'20261105',days:7},keyword:'AI创业',...extra});}

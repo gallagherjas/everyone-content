@@ -1,7 +1,16 @@
 {
   "name": "everyone-content",
+  "description": "本地优先的多账号内容运营工作台：抖音指数采集 + 账号画像 + Agent选题评估与写作",
   "private": true,
+  "license": "AGPL-3.0",
   "type": "module",
+  "keywords": [
+    "content-operations",
+    "douyin",
+    "agent-skills",
+    "local-first",
+    "sqlite"
+  ],
   "engines": {
     "node": ">=24"
   },
@@ -11,10 +20,15 @@
     "web": "node server/index.ts",
     "dev:web": "npm --prefix frontend run dev",
     "build:web": "npm --prefix frontend run build",
-    "test": "node --test tests/*.test.ts tests/collector/*.test.mjs",
+    "test": "node --test tests/*.test.ts tests/collector/*.test.ts",
+    "typecheck": "tsc --noEmit",
     "collection:plan": "sh bin/collect.sh --plan"
   },
   "dependencies": {
     "playwright": "^1.65.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "typescript": "^5.9.3"
   }
 }

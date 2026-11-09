@@ -18,10 +18,10 @@ CREATE TABLE IF NOT EXISTS account_initialization (
 CREATE TABLE IF NOT EXISTS account_sources (
   id INTEGER PRIMARY KEY,
   account_id INTEGER NOT NULL REFERENCES accounts(id),
-  kind TEXT NOT NULL CHECK(kind IN ('blogger','keyword')),
+  kind TEXT NOT NULL CHECK(kind='keyword'),
   source_key TEXT NOT NULL,
   name TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'ready' CHECK(status IN ('ready','paused','pending')),
+  status TEXT NOT NULL DEFAULT 'ready' CHECK(status IN ('ready','paused')),
   note TEXT NOT NULL DEFAULT '',
   UNIQUE(account_id, kind, source_key)
 );

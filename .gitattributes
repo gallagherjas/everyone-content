@@ -1,0 +1,15 @@
+# 统一换行符：仓库内一律LF，防止Windows检出CRLF导致shell脚本失效或整文件diff。
+* text=auto eol=lf
+
+# 换行敏感文件必须保持LF
+*.sh   text eol=lf
+*.ts   text eol=lf
+*.mjs  text eol=lf
+*.json text eol=lf
+*.sql  text eol=lf
+*.md   text eol=lf
+*.css  text eol=lf
+*.html text eol=lf
+
+# 二进制文件不做换行处理
+*.png  binary
