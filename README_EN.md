@@ -65,12 +65,21 @@ Open http://127.0.0.1:8788 — a blank default account is created on first start
 4. **Pick topics yourself** — browse selected videos in the workbench, watch them on the platform, decide on your own.
 5. **Agent review** — submit a **title, target audience, one-line value**; the agent checks account fit, consistency, and specificity.
 
+"Published" records actual release links; metrics appear only when the index has collected the same work, and stay unknown otherwise.
+
+## Multi-account
+
+An account is an independent local content-operations space, not a Douyin login; a blank default account is created on first start. Keywords, index authorization, filter rules, profiles, and collection results are maintained per account — a new account starts blank and inherits nothing from other accounts. Authorization scopes are `account:<id>`; the same keyword never borrows another account's authorization or results. Archiving keeps the history and blocks writes and scheduled collection; restoring resumes normal use.
+
+See [accounts & profiles](docs/MULTI_ACCOUNT.md) for details.
+
 ## Privacy & data boundaries
 
 - Everything stays local: SQLite database, runtime data, profile Git repository. No third-party services.
 - Sessions and authorization files are secrets (0600), never committed, never echoed to the frontend.
 - Reviews are delivered in conversation; the workbench has no registration entry.
 - UI times are interpreted as Beijing time; the database stores UTC.
+- **Usage boundary**: this project is for data collection and inspiration only — plagiarism and imitation are rejected. Collected topics, videos, and creator data serve only as factual references for topic selection; keep your own work independent and original.
 - **Disclaimer**: this project connects to the Douyin Index through the official login window for personal research on your own accounts. You are responsible for complying with platform terms and local law; keep the built-in rate limits enabled.
 
 ## Contributing
