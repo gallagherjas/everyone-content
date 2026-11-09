@@ -2,7 +2,7 @@
 
 <img src="frontend/public/brand/mascot.png" alt="everyone-content mascot" width="96" />
 
-**A local-first workbench for multi-account content operations**: discover topic material through the Douyin Index, ground decisions in per-account profiles, and complete the whole collect → select → review process faster and with higher quality.
+**A local-first workbench for multi-account content operations**: discover topic material through the Douyin Index, ground decisions in per-account profiles, and complete the whole collect → select → review → write process faster and with higher quality.
 
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPLv3-blue.svg)](LICENSE)
 ![Node](https://img.shields.io/badge/node-%E2%89%A524-green)
@@ -42,7 +42,7 @@ Key design:
 
 ## Quick start
 
-Requires **Node.js 24+**, **Git**, and an agent that can read project instructions and local skills. macOS / Linux; index QR login needs a local desktop.
+Requires **Node.js 24+**, **Git**, and an agent that can read project instructions and local skills. macOS / Linux are fully supported; Windows is untested — the workbench runs, but CLI collection depends on `sh` (use Git Bash, or run `node collector/run.ts` directly), and skill discovery needs symlinks enabled (Developer Mode + `git config core.symlinks true`). Index QR login needs a local desktop.
 
 ```sh
 git clone <repository-url>
@@ -64,6 +64,7 @@ Open http://127.0.0.1:8788 — a blank default account is created on first start
 3. **Configure collection** — add keywords in Settings → Keywords, then set collection parameters and filter rules in Settings → Collection; run manually from Collection → Discovery, or schedule a daily Beijing-time run. The daily request cap is shared across accounts, max 10 per tick.
 4. **Pick topics yourself** — browse selected videos in the workbench, watch them on the platform, decide on your own.
 5. **Agent review** — submit a **title, target audience, one-line value**; the agent checks account fit, consistency, and specificity.
+6. **Write on demand** — before any drafting or editing you must provide 3 of your own video scripts (300+ characters in total); writing preferences only supplement them (templates: [originals](skills/personal-writing/assets/user-original.md), [preferences](skills/personal-writing/assets/writing-preferences.md)). The agent works only from your own materials — no generic templates, and no sample drafts when materials are missing. Confirmed preferences and originals are registered under local `runtime/writing/` and accumulate across sessions; reference text is capped (≤20 originals and ≤20,000 characters in total, preferences ≤5,000 characters) so it never grows unbounded.
 
 "Published" records actual release links; metrics appear only when the index has collected the same work, and stay unknown otherwise.
 
@@ -77,7 +78,8 @@ See [accounts & profiles](docs/MULTI_ACCOUNT.md) for details.
 
 - Everything stays local: SQLite database, runtime data, profile Git repository. No third-party services.
 - Sessions and authorization files are secrets (0600), never committed, never echoed to the frontend.
-- Reviews are delivered in conversation; the workbench has no registration entry.
+- Writing preferences and originals are stored per account under local `runtime/writing/` (0600), with count and size caps.
+- Reviews and drafts are delivered in conversation; the workbench has no registration entry.
 - UI times are interpreted as Beijing time; the database stores UTC.
 - **Usage boundary**: this project is for data collection and inspiration only — plagiarism and imitation are rejected. Collected topics, videos, and creator data serve only as factual references for topic selection; keep your own work independent and original.
 - **Disclaimer**: this project connects to the Douyin Index through the official login window for personal research on your own accounts. You are responsible for complying with platform terms and local law; keep the built-in rate limits enabled.
