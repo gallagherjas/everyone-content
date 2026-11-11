@@ -1,54 +1,56 @@
 # everyone-content 架构
 
-everyone-content由Node.js本地API、React界面、抖音指数采集程序和SQLite组成，默认监听`127.0.0.1:8788`。账号表示独立的内容运营空间。
-
-## 数据流
+## 项目结构
 
 ```text
-账号关键词、指数授权与筛选规则
-  → planner：生成到期任务
-  → runner：租约、限速、预算与请求
-  → 原始响应、解析缓存、作品、作者、话题及指标观测
-  → SQLite → 工作台
+everyone-content/
+├── frontend/                 React 工作台，使用 Vite 构建
+│   ├── src/                   应用入口、账号切换、API 请求与全局样式
+│   │   ├── pages/             采集、已发布、设置三个页面
+│   │   └── components/        画像编辑、采集设置、页面缓存和共用组件
+│   ├── public/                品牌与静态资源
+│   └── dist/                  构建生成的前端产物
+├── server/                   Node.js 本地服务，提供 API 和前端产物
+├── bin/                      采集命令启动入口
+├── collector/                采集程序
+│   ├── core/                  任务规划、执行、存储和结果整理
+│   └── sources/
+│       └── douyin-index/      抖音指数协议、客户端和授权读取
+├── lib/                      账号、画像版本、数据库连接、作品与定时调度
+├── db/                       SQLite 表结构和迁移
+├── skills/                   Agent 执行的业务流程
+├── .agents/
+│   └── skills/                供 Agent 发现的同步副本
+├── prompts/                  账号画像模板
+├── runtime/                  本机授权、采集文件、画像草稿与快照
+├── docs/                     操作手册和架构说明
+└── tests/                    API、采集与前端回归测试
 ```
 
-唯一数据源为抖音指数。账号显式配置关键词；近30天话题通过指数门槛和排除词检查后取最多5个，关键词视频与入选话题的关联视频先合并去重，再按点赞及排除词筛选。达人候选来自入选视频及话题点赞、评论榜。不同查询的视频指数不跨查询直接比较。
+## 采集数据流
 
-原始响应与解析缓存压缩保存于`runtime/collection/objects/`，数据库登记路径和SHA256。未知指标保留null，平台ID保留字符串，采集时间与来源有效日期、统计窗口分别记录。
+```text
+工作台手动采集 / 本地定时调度 / CLI
+  → 采集程序
+  → planner：按账号配置和授权生成任务
+  → runner：领取任务、检查额度并请求抖音指数
+  → store：保存请求记录、原始响应和解析数据
+  → projection：根据本账号的采集记录生成发现结果及指标
+  → 本地 API → 工作台
+```
 
-## 目录
+工作台手动采集和定时采集共用子进程入口与全局互斥锁。服务每 30 秒检查定时任务，在 `collection_schedule_runs` 中按账号、来源和时点记录已启动的任务，避免重复执行。[定时调度](../lib/collection-scheduler.ts)
 
-- `collector/run.ts`：采集与规划命令入口。
-- `collector/core/`：任务规划、执行、存储、发现、投影及状态。
-- `collector/sources/douyin-index/`：指数协议、只读HTTP客户端与授权读取。
-- `lib/`：账号、画像版本、数据库、作品、时间及定时调度。
-- `db/`：表结构和空库初始化，仅预置指数请求额度。
-- `server/`、`frontend/`：本地API、采集、已发布与设置页面。
-- `skills/`：初始化、选题评估与个人写作三个业务Skill及空白资料模板。
-- `.agents/skills/`：三个Skill的同步真实副本（非符号链接，测试校验一致），Windows检出即可用。
-- `tests/`：合成数据回归及模拟DOM校验，使用临时数据库。
+原始响应与解析数据压缩保存于 `runtime/collection/objects/`，SQLite 记录文件路径和 SHA256，并保存作品、作者、话题及指标观测。采集时间、来源有效日期和统计窗口分别记录。未知指标保留 `null`，平台 ID 以字符串保存。数据库时间以 UTC 空格格式存储，界面按北京时间显示。
 
-## 账号与画像
+发现结果由关键词视频、话题关联视频和榜单数据生成。达人候选来自入选视频及话题点赞榜、评论榜。[结果生成](../collector/core/discovery.ts) · [采集配置和筛选](COLLECTION.md)
 
-配置、授权、订阅、任务归属及结果按账号隔离，API通过`x-everyone-content-account`核对对象归属。归档保留历史并阻止新增写入。指数授权按`account:<编号>`隔离，同词不代表可以借用其他账号的授权或响应。
+## 账号隔离与画像版本
 
-`account_initialization`缓存全部七个画像章节的完整性，绑定当前SHA和章节契约版本。生效与恢复画像时同步更新；`GET /api/initialization`仅查询SQLite，返回简短状态，不读取画像、Skill或其他资料。
+服务从请求头确定当前账号，按 `account_id` 核对对象归属。采集任务使用 `account:<编号>` 区分授权范围。
 
-画像通过Git引用`refs/everyone-content/profiles/<account_id>`版本化，SQLite保存当前版本指针与审计记录。草稿位于`runtime/drafts/<account_id>/`，生效快照位于`runtime/releases/<sha>/`。保存画像不切分支或修改用户暂存区，恢复版本会生成新提交。
+画像正文通过 Git 引用 `refs/everyone-content/profiles/<account_id>` 版本化，SQLite 保存生效版本指针和审计记录。草稿位于 `runtime/drafts/<account_id>/`，生效快照位于 `runtime/releases/<sha>/`。[画像版本实现](../lib/strategies.ts)
 
-## 用户与Agent
+`account_initialization` 缓存画像完整性，绑定生效版本和章节规则版本。`GET /api/initialization` 从 SQLite 读取状态。服务在启动、建号、更新账号、发布或恢复画像时，将账号编号、完成状态和生效版本同步到 `AGENTS.md` 的固定标记区。[状态同步](../lib/agent-state.ts)
 
-Agent先看`AGENTS.md`固定区域的状态。首次使用且没有可用账号时，Agent在介绍工作台的同一回复里问账号名称和定位，拿到名称即通过 `POST /api/accounts` 建号。已有账号先确认目标账号，再按初始化Skill补齐七个章节并保存生效。草稿不算完成，画像版本变化自动更新状态并同步`AGENTS.md`中的状态句。状态句只包含账号编号、完成标记及版本。
-
-指数登录独立于画像。用户点击连接后，Playwright创建专用临时浏览器会话，用户扫码完成页面验证后保存本账号Cookie和User-Agent，目录0700、文件0600。登录可取消或超时，数据库仅登记引用，不读取已有浏览器个人资料，不把凭据返回前端。未安装浏览器时按需准备，登录窗口需要图形桌面。实际指数权限在采集时校验。
-用户自行浏览和提出选题，评估Skill只核对明确问题。评估与稿件在对话中交付，写稿改稿前必须收齐本人3篇视频原稿（正文合计至少300字）；偏好与原稿经确认登记于`runtime/writing/<账号>/`并设篇数与字数上限，没有创作事件路由。
-
-已发布作品可手动登记；只有指数实际收录同一作品时，才追加来源提供的指标快照。
-
-## 调度与界面
-
-采集支持手动触发和按账号配置的每日北京时间，定时默认关闭。本地服务每30秒检查时间点，复用统一入口与全局互斥锁；记录已触发时间点，唤醒时只补当天最近一次。
-
-页面切换保留分页、滚动和未保存输入；隐藏页面暂停状态轮询，切换账号清空会话缓存。数据库时间使用UTC空格格式，界面统一显示北京时间。来源每日额度在北京时间08:00重置，所有账号共享。
-
-运行见[采集](COLLECTION.md)，画像及备份见[账号说明](MULTI_ACCOUNT.md)。`npm test`执行回归，`npm run build:web`执行前端类型检查与构建。
+账号操作和备份见[账号与画像](MULTI_ACCOUNT.md)。

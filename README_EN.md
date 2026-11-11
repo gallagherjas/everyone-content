@@ -26,22 +26,6 @@ People running multiple content accounts face three scattered things: topic choi
 
 Tip: the agent never picks topics for you, because it leans too heavily on historical data and lacks creativity — this project reviews topics, it does not generate them. We also hope you become a genuinely creative person: some ideas may be inspired by others, but never just trust the AI!!
 
-## How it works
-
-This project has two halves:
-a **local workbench** for configuration, collection, and data display;
-an **agent conversation** for profiles and topic review.
-
-They are connected through local state:
-
-```text
-account keywords, index authorization, filter rules
-  → planner: due tasks
-  → runner: leases, rate limits, budgets, requests
-  → raw responses, parse cache, works, authors, topics, metric observations
-  → SQLite → workbench
-```
-
 ## Quick start
 
 Requires **Node.js 24+**, **Git**, and an agent that can read project instructions and local skills. macOS, Linux, and Windows are supported (CI runs on both platforms); index QR login needs a local desktop.
@@ -55,11 +39,12 @@ npm run build:web
 npm run web
 ```
 
-Open http://127.0.0.1:8788. You can name and create an account in the workbench, or ask the agent to help in a conversation opened in the project directory:
+Open http://127.0.0.1:8788 and enter a name in the workbench to create an account. If the port is in use, run `WEB_PORT=8789 npm run web`.
 
-> Start the project and show me how to use it.
+Open an agent conversation in the project directory and try either of these requests.
 
-The agent asks for the account name and positioning in the same reply. Once you provide a name, it creates the account and guides you through the seven profile sections. For an existing account, it picks up with the missing sections.
+- Start the project and show me how to use it.
+- Help me create an account and fill out its profile.
 
 ## Core flow
 
@@ -90,7 +75,7 @@ See [accounts & profiles](docs/MULTI_ACCOUNT.md) for details.
 
 ## Contributing
 
-Run checks matching your change: `npm test`, `npm run typecheck`, `npm run build:web`. Skills live only in `skills/`; `.agents/skills/` registers them via relative links. Keep tests green before opening a PR.
+Run checks matching your change: `npm test`, `npm run typecheck`, `npm run build:web`. Maintain skill sources in `skills/`. The files in `.agents/skills/` are synchronized copies used for agent discovery, and tests verify that they match.
 
 ## License
 

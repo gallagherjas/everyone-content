@@ -9,7 +9,7 @@ description: 用户要求评估自己的选题是否适合账号、检查目标�
 
 ## 输入与依据
 
-- 确认 `account_id`，通过带 `x-everyone-content-account` 的 `GET /api/context` 核对`initialized`及生效画像版本，读取其中的 `account-profile.md`。账号隔离规则见 [账号说明](../../docs/MULTI_ACCOUNT.md)。
+- 确认 `account_id`，通过带 `x-everyone-content-account` 的 `GET /api/context` 核对`initialized`及生效画像版本，读取返回的 `strategy_dir` 下的 `account-profile.md`。
 - 让用户提供：**标题、目标群体、主要价值（一句话）**。缺项时只询问缺项，不代填。
 - 以用户明确的信息和账号画像为依据。画像留白、受众范围不明时进行询问，不能把未写明当作不符合。
 
@@ -31,4 +31,4 @@ description: 用户要求评估自己的选题是否适合账号、检查目标�
 
 改标题只使用用户已提供或可核实的事实，保留其主要价值。例如「AI怎么落地」可以结合用户实际的人群和用途说具体；只有用户确实提供了本人一天产出 50 个视频的事实，才能建议「我用AI一天产出50个视频」。不能为了具体而编造人群、数字、经历、收益或效果；材料不够就指出缺什么。
 
-本 skill 不写入评分或内容状态；除必要的初始化补全外，不自行启动采集或创作事件，用户保留最终决定权。
+本 skill 不写入评分或内容状态。
