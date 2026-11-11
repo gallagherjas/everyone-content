@@ -56,18 +56,19 @@ export default function CollectionRules({ account, onSaved }: { account: Account
   useEffect(() => {
     let live = true;
     api<Account>('/api/collection/config').then(value => {
-      if (live) { const current = draftOf(value.config.index); setDraft(current); setSaved(current); }
+      if (live) { setDraft(draftOf(value.config.index)); setSaved(value.config.index); }
     }).catch(error => { if (live) { setFailed(true); setMessage(String(error)); } });
     return () => { live = false; };
   }, [api]);
   const policy = draft.discovery ?? {};
-  const dirty = saved !== null && (JSON.stringify(draft) !== JSON.stringify(saved) || !!input.trim());
+  const dirty = saved !== null && (JSON.stringify(draft) !== JSON.stringify(draftOf(saved)) || !!input.trim());
+  const needsSave = dirty || saved?.discovery === null;
   const disabled = account.status === 'archived' || busy || saved === null;
   const excluded = policy.excludeKeywords as string[];
   const change = (key: string, value: unknown) => { setDraft(current => ({ ...current, discovery: { ...current.discovery, [key]: value } })); setMessage(''); };
   const add = () => { change('excludeKeywords', words([...excluded, ...splitWords(input)])); setInput(''); };
   const save = async (event: FormEvent) => {
-    event.preventDefault(); if (disabled || !dirty) return;
+    event.preventDefault(); if (disabled || !needsSave) return;
     setBusy(true); setFailed(false); setMessage('');
     try {
       const index = { ...draft, discovery: { ...policy,
@@ -75,19 +76,19 @@ export default function CollectionRules({ account, onSaved }: { account: Account
         ...Object.fromEntries(limits.map(([key]) => [key, Number(policy[key])])),
       } };
       const value = await api<Account>('/api/collection/config', { method: 'PUT', body: JSON.stringify(index) });
-      const current = draftOf(value.config.index); setDraft(current); setSaved(current); setInput('');
+      setDraft(draftOf(value.config.index)); setSaved(value.config.index); setInput('');
       await onSaved(value); setMessage('已保存，现有数据已按新规则重新筛选。');
     } catch (error) { setFailed(true); setMessage(String(error)); }
     finally { setBusy(false); }
   };
   return <section className="panel space-y-5">
-    <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-display text-lg">抖音指数筛选规则</h3><span className="text-xs text-muted">{account.name} · {saved === null ? '正在加载规则' : dirty ? '有未保存修改' : '已保存'}</span></div>
+    <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-display text-lg">抖音指数筛选规则</h3><span className="text-xs text-muted">{account.name} · {saved === null ? '正在加载规则' : dirty ? '有未保存修改' : saved.discovery === null ? '默认规则待保存' : '已保存'}</span></div>
     <form onSubmit={save}>
       <fieldset disabled={disabled} className="space-y-6">
         <KeywordEditor values={excluded} input={input} onInput={value => { setInput(value); setMessage(''); }}
           onAdd={add} onRemove={word => change('excludeKeywords', excluded.filter(value => value !== word))} />
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{limits.map(([key, label, fallback, min, max]) => <label className="block text-sm" key={key}>{label}<input className="field" type="number" required step="1" min={min} max={max} value={String(policy[key] ?? fallback)} onChange={event => change(key, event.target.value)} /></label>)}</div>
-        <div className="flex flex-wrap items-center gap-3"><button type="submit" className="btn-primary" disabled={disabled || !dirty}>{busy ? '保存并重新筛选中…' : '保存并重新筛选'}</button><button type="button" className="btn" disabled={disabled || !dirty} onClick={() => { if (saved) setDraft(saved); setInput(''); setMessage(''); }}>取消修改</button></div>
+        <div className="flex flex-wrap items-center gap-3"><button type="submit" className="btn-primary" disabled={disabled || !needsSave}>{busy ? '保存并重新筛选中…' : '保存并重新筛选'}</button><button type="button" className="btn" disabled={disabled || !dirty} onClick={() => { if (saved) setDraft(draftOf(saved)); setInput(''); setMessage(''); }}>取消修改</button></div>
       </fieldset>
     </form>
     {message && <Msg tone={failed ? 'error' : 'ok'}>{message}</Msg>}

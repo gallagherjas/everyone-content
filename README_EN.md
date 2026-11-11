@@ -44,18 +44,15 @@ Open http://127.0.0.1:8788 and enter a name in the workbench to create an accoun
 Open an agent conversation in the project directory and try either of these requests.
 
 - Start the project and show me how to use it.
-- Help me create an account and fill out its profile.
+- Set up an account, complete its profile, and configure Douyin Index collection.
 
 ## Core flow
 
-1. **Initialize the account** — complete the initial account profile; topic review unlocks after it is published. You can also do this in Settings → Account Profile.
-2. **Connect the Douyin Index** — scan the QR code in the dedicated official login window; the session is stored privately (0700/0600), no cookie export needed.
-3. **Configure collection** — add keywords in Settings → Keywords, then set collection parameters and filter rules in Settings → Collection; run manually from Collection → Discovery, or schedule a daily Beijing-time run. The daily request cap is shared across accounts, max 10 per tick.
-4. **Pick topics yourself** — browse selected videos in the workbench, watch them on the platform, decide on your own.
-5. **Agent review** — submit a **title, target audience, one-line value**; the agent checks account fit, consistency, and specificity.
-6. **Write on demand** — before any drafting or editing you must provide 3 of your own video scripts (300+ characters in total); writing preferences only supplement them (templates: [originals](skills/personal-writing/assets/user-original.md), [preferences](skills/personal-writing/assets/writing-preferences.md)). The agent works only from your own materials — no generic templates, and no sample drafts when materials are missing. Confirmed preferences and originals are registered under local `runtime/writing/` and accumulate across sessions; reference text is capped (≤20 originals and ≤20,000 characters in total, preferences ≤5,000 characters) so it never grows unbounded.
-
-"Published" records actual release links; metrics appear only when the index has collected the same work, and stay unknown otherwise.
+1. **Set up an account.** Create or select an account, publish its completed profile, connect to the Douyin Index, and save keywords and filter rules. For an existing account, resume from the missing steps. 
+2. **Collect.** Run collection from Collection → Discovery, ask the agent to run it for a specific account, or enable a schedule in collection settings.
+3. **Pick topics yourself.** Browse selected videos in the workbench, watch them on the platform, and decide which topics to pursue.
+4. **Ask the agent to review a topic.** Once the completed profile is published, submit a **title, target audience, and one-line value**. The agent checks account fit, consistency, and specificity. You can include reference videos.
+5. **Write on demand.** Before drafting or editing, provide 3 of your own video scripts with at least 300 characters of body text in total. 
 
 ## Multi-account
 

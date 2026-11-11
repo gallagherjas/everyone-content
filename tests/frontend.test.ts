@@ -52,7 +52,10 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     else if (url.pathname === '/api/contents') data = Array.from({ length: 25 }, (_, n) => ({ id: account * 1000 + n + 1, published_url: `https://www.douyin.com/video/${account}-${n + 1}`, published_at: '2026-11-09 04:00:00', metrics: null }));
     else if (url.pathname === '/api/sources') data = { keywords: [] };
     else if (url.pathname === '/api/index-auth') data = { status: 'missing', configured: false, message: '尚未连接抖音指数。' };
-    else if (url.pathname === '/api/collection/config') data = accounts.find(value => value.id === account);
+    else if (url.pathname === '/api/collection/config') {
+      data = accounts.find(value => value.id === account);
+      if (method === 'PUT') data.config = { ...data.config, index: JSON.parse(init.body) };
+    }
     else if (url.pathname === '/api/strategy') data = { sha: 'a'.repeat(40), base_sha: 'a'.repeat(40), draft: { 'account-profile.md': '初始画像' }, published: {}, history: [] };
     else if (url.pathname === '/api/keywords' && method === 'POST') data = { ok: true };
     else throw new Error(`Unexpected API: ${method} ${url.pathname}`);
@@ -132,6 +135,13 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     runs.push({ id: 1, provider: 'index', operation: 'videos', target: '1', status: 'ok', observed_at: '2026-11-09 04:00:00', version: null, error: null });
     await act(async () => { [...timers.values()][0](); });
     assert.equal(count('/api/collection'), collectionLoads + 1); // 轮询发现新记录后重新加载
+    await navigate('设置'); await click('采集设置');
+    const saveRules = button('保存并重新筛选');
+    assert.equal(saveRules.disabled, false);
+    await act(async () => { saveRules.click(); });
+    assert.deepEqual(accounts[0].config.index.discovery.excludeKeywords, []);
+    assert.equal(accounts[0].config.index.discovery.minVideoLikes, 100);
+    assert.equal(button('保存并重新筛选').disabled, true);
   } finally {
     await act(async () => { root.unmount(); });
     for (const [key, descriptor] of originals) {

@@ -23,7 +23,7 @@ everyone-content/
 │   └── skills/                供 Agent 发现的同步副本
 ├── prompts/                  账号画像模板
 ├── runtime/                  本机授权、采集文件、画像草稿与快照
-├── docs/                     操作手册和架构说明
+├── docs/                     文档
 └── tests/                    API、采集与前端回归测试
 ```
 
@@ -43,7 +43,7 @@ everyone-content/
 
 原始响应与解析数据压缩保存于 `runtime/collection/objects/`，SQLite 记录文件路径和 SHA256，并保存作品、作者、话题及指标观测。采集时间、来源有效日期和统计窗口分别记录。未知指标保留 `null`，平台 ID 以字符串保存。数据库时间以 UTC 空格格式存储，界面按北京时间显示。
 
-发现结果由关键词视频、话题关联视频和榜单数据生成。达人候选来自入选视频及话题点赞榜、评论榜。[结果生成](../collector/core/discovery.ts) · [采集配置和筛选](COLLECTION.md)
+发现结果由关键词视频、话题关联视频和榜单数据生成。达人候选来自入选视频及话题点赞榜、评论榜。[结果生成](../collector/core/discovery.ts) · [采集配置和筛选](../skills/collection/references/COLLECTION.md)
 
 ## 账号隔离与画像版本
 
@@ -51,6 +51,6 @@ everyone-content/
 
 画像正文通过 Git 引用 `refs/everyone-content/profiles/<account_id>` 版本化，SQLite 保存生效版本指针和审计记录。草稿位于 `runtime/drafts/<account_id>/`，生效快照位于 `runtime/releases/<sha>/`。[画像版本实现](../lib/strategies.ts)
 
-`account_initialization` 缓存画像完整性，绑定生效版本和章节规则版本。`GET /api/initialization` 从 SQLite 读取状态。服务在启动、建号、更新账号、发布或恢复画像时，将账号编号、完成状态和生效版本同步到 `AGENTS.md` 的固定标记区。[状态同步](../lib/agent-state.ts)
+`account_initialization` 缓存画像完整性，绑定生效版本和章节规则版本。`GET /api/context` 的 `initialized` 对应所请求画像版本的完整性。`GET /api/initialization` 为每个账号保留 `initialized`、`missing_sections` 和 `index_auth_configured`，并从 SQLite 中的账号、画像、授权登记、有效关键词和已保存的筛选规则推导 `setup.complete` 与 `setup.missing`。采集验证使用采集记录和登录状态。[状态实现](../lib/initialization.ts)
 
-账号操作和备份见[账号与画像](MULTI_ACCOUNT.md)。
+账号操作和备份见[账号与画像](../skills/account-profile/references/MULTI_ACCOUNT.md)。

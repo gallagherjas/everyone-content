@@ -7,10 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { account, InputError } from './accounts.ts';
 import { ensureInitialization, recordInitialization, initializationStatus } from './initialization.ts';
 import { profileCompletion } from './profile.ts';
-import { syncAgentInitialization } from './agent-state.ts';
 
 export const ROOT = fileURLToPath(new URL('..', import.meta.url));
-export const INSTRUCTIONS = process.env.EVERYONE_CONTENT_INSTRUCTIONS_PATH || join(ROOT, 'AGENTS.md');
 const configuredData = process.env.EVERYONE_CONTENT_DATA_DIR;
 export const DATA = configuredData ? resolve(configuredData) : join(ROOT, 'runtime');
 const REPO = process.env.EVERYONE_CONTENT_GIT_ROOT || ROOT;
@@ -171,7 +169,7 @@ function activate(db: DatabaseSync, id: number, files: Record<string, string>, n
     throw e;
   }
   atomic(join(draftDir(id), 'base.txt'), sha);
-  return { ...strategy(db, id), instructions_synced: syncAgentInitialization(db, INSTRUCTIONS) };
+  return strategy(db, id);
 }
 export function publish(db: DatabaseSync, id: number, base: unknown, note: unknown) {
   checkBase(db, id, base);
@@ -207,7 +205,7 @@ export function rollback(db: DatabaseSync, id: number, sha: unknown, base: unkno
   for (const [n, value] of Object.entries(files))
     if (n === 'account-profile.md') atomic(join(draftDir(id), n), value);
   atomic(join(draftDir(id), 'base.txt'), restored);
-  return { ...strategy(db, id), instructions_synced: syncAgentInitialization(db, INSTRUCTIONS) };
+  return strategy(db, id);
 }
 export function context(db: DatabaseSync, id: number, sha?: string | null) {
   const a = account(db, id);

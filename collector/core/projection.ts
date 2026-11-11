@@ -1,5 +1,6 @@
+import type { DatabaseSync } from 'node:sqlite';
 import { upsertWork,upsertAuthor } from '../../lib/works.ts';
-import { linkWork } from '../../lib/accounts.ts';
+import { linkWork, type AccountConfig } from '../../lib/accounts.ts';
 import { Discovery,normalize } from './discovery.ts';
 import type { CollectionStore } from './store.ts';
 function identity(store: CollectionStore,run: any,namespace: string,id: any,row: any={}) {
@@ -43,12 +44,18 @@ function captures(store: CollectionStore, accountId: number, type: string, targe
     return {type, id: spec.id, keyword: spec.keyword, run, window, data: store.data(run)};
   });
 }
+export function collectionKeywords(db: DatabaseSync, accountId: number, tasks: AccountConfig['index']['tasks'] = []) {
+  const configured = db.prepare(`SELECT source_key FROM account_sources
+    WHERE account_id=? AND kind='keyword' AND status='ready'`).all(accountId).map(row => String(row.source_key));
+  const legacy = tasks.filter(task => ['videos', 'topic_search'].includes(task.type)).map(task => task.keyword);
+  const keywords = new Map<string, string>();
+  for (const keyword of [...configured, ...legacy])
+    if (keyword) keywords.set(normalize(keyword), keyword.trim());
+  return [...keywords.values()].filter(Boolean);
+}
+
 export function indexSelection(store: CollectionStore, a: any): Discovery {
-  const keywords = new Map<string,string>();
-  const configured = (store.db.prepare("SELECT source_key FROM account_sources WHERE account_id=? AND kind='keyword' AND status='ready'").all(a.id) as any[]).map((s: any) => s.source_key);
-  for (const keyword of [...configured, ...a.config.index.tasks.filter((t: any) => ['videos','topic_search'].includes(t.type)).map((t: any) => t.keyword)])
-    if (keyword) keywords.set(normalize(keyword), keyword);
-  const d = new Discovery(a.config.index.discovery ?? {}, [...keywords.values()]);
+  const d = new Discovery(a.config.index.discovery ?? {}, collectionKeywords(store.db, a.id, a.config.index.tasks));
   const topics=captures(store,a.id,'topic_search',d.keywords);
   const dates=captures(store,a.id,'topic_dates',['topic_dates'])[0]?.data;
   const end=dates?.valid_day??topics.filter((c: any)=>c.window).map((c: any)=>c.window.end).sort().at(-1);

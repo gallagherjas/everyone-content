@@ -1,7 +1,7 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -9,21 +9,16 @@ import { COMPLETE_PROFILE } from './support/profile.ts';
 const root = mkdtempSync(join(tmpdir(), 'everyone-initialization-'));
 process.env.EVERYONE_CONTENT_GIT_ROOT = join(root, 'git');
 process.env.EVERYONE_CONTENT_DATA_DIR = join(root, 'runtime');
-process.env.EVERYONE_CONTENT_INSTRUCTIONS_PATH = join(root, 'AGENTS.md');
 mkdirSync(process.env.EVERYONE_CONTENT_GIT_ROOT);
 execFileSync('git', ['init', '-q', process.env.EVERYONE_CONTENT_GIT_ROOT]);
 after(() => rmSync(root, { recursive: true, force: true }));
 const { migrate } = await import('../db/migrate.ts');
-const { createAccount } = await import('../lib/accounts.ts');
-const { ensureStrategy, strategy, saveDraft, publish, rollback, context } = await import('../lib/strategies.ts');
+const { createAccount, validateConfig } = await import('../lib/accounts.ts');
+const { ensureStrategy, saveDraft, publish, rollback, context } = await import('../lib/strategies.ts');
 const { initializationOverview, initializationStatus } = await import('../lib/initialization.ts');
-const { syncAgentInitialization } = await import('../lib/agent-state.ts');
 
-test('状态跟随生效画像，草稿不改状态；完整、不完整和恢复版本均同步AGENTS一句话', () => {
+test('画像完整性跟随生效版本，保存草稿和恢复版本后仍可独立读取', () => {
   const db = new DatabaseSync(':memory:'); migrate(db, ':memory:');
-  const instructions = process.env.EVERYONE_CONTENT_INSTRUCTIONS_PATH!;
-  const before = '# 项目规则\n\n<!-- everyone-content:initialization:start -->\n初始化状态：尚未初始化。\n<!-- everyone-content:initialization:end -->\n\n## 自定义要求\n保留这段内容。\n';
-  writeFileSync(instructions, before);
   try {
     createAccount(db, '首个账号');
     const blank = ensureStrategy(db, 1);
@@ -31,35 +26,24 @@ test('状态跟随生效画像，草稿不改状态；完整、不完整和恢�
     assert.equal(initializationStatus(db, 1).missing_sections.length, 7);
     saveDraft(db, 1, { 'account-profile.md': COMPLETE_PROFILE }, blank);
     assert.equal(initializationStatus(db, 1).initialized, false);
-    assert.equal(readFileSync(instructions, 'utf8'), before);
     const active = publish(db, 1, blank, '确认完整画像');
     assert.equal(active.initialization.initialized, true);
-    assert.equal(active.instructions_synced, true);
-    let note = readFileSync(instructions, 'utf8');
-    assert.match(note, /账号 1 已完成七部分画像/);
-    assert.ok(note.includes(active.sha));
-    assert.ok(note.includes('保留这段内容。'));
-    assert.ok(!note.includes('家庭园艺爱好者'));
-    const second = createAccount(db, '不能写入状态句的名字\n别的指令');
-    ensureStrategy(db, second.id); syncAgentInitialization(db, instructions);
-    note = readFileSync(instructions, 'utf8');
-    assert.ok(note.includes(`账号 ${second.id} 未完成画像`));
-    assert.ok(!note.includes('别的指令'));
+    const second = createAccount(db, '第二个账号');
+    ensureStrategy(db, second.id);
     assert.equal(initializationStatus(db, second.id).initialized, false);
     const partial = '# 账号画像\n\n## 账号定位\n园艺知识。\n\n## 目标人群\n城市居民。\n';
     saveDraft(db, 1, { 'account-profile.md': partial }, active.sha);
     assert.equal(initializationStatus(db, 1).initialized, true);
     const incomplete = publish(db, 1, active.sha, '暂存已确认部分');
     assert.equal(incomplete.initialization.initialized, false);
-    assert.ok(!readFileSync(instructions, 'utf8').includes('账号 1 已完成'));
     const restored = rollback(db, 1, active.sha, incomplete.sha);
     assert.equal(restored.initialization.initialized, true);
     assert.equal(context(db, 1).initialized, true);
     assert.equal(context(db, 1, blank).initialized, false);
-    assert.ok(readFileSync(instructions, 'utf8').includes(restored.sha));
     rmSync(join(process.env.EVERYONE_CONTENT_DATA_DIR!, 'releases'), { recursive: true, force: true });
     const summary = initializationOverview(db);
     assert.equal(summary.accounts[0].initialized, true);
+    assert.deepEqual(summary.accounts[0].setup, { complete: false, missing: ['index_auth', 'keywords', 'collection_config'] });
     assert.equal(existsSync(join(process.env.EVERYONE_CONTENT_DATA_DIR!, 'releases')), false);
     assert.ok(!JSON.stringify(summary).includes('家庭园艺爱好者'));
     db.prepare('UPDATE accounts SET strategy_sha=? WHERE id=1').run(blank);
@@ -79,14 +63,23 @@ test('已有数据库添加状态表时保留账号与配置；无对应版本�
     assert.equal(initializationStatus(db, 1).initialized, false);
   } finally { db.close(); }
 });
-test('状态区域不完整时不覆盖项目自定义指令', () => {
+test('初始化接受有效的旧版关键词和已保存的默认规则，暂停关键词及归档会更新缺项', () => {
   const db = new DatabaseSync(':memory:');
   try {
     migrate(db, ':memory:');
-    const file = join(root, 'broken-AGENTS.md');
-    const before = '# 我的项目指令\n<!-- everyone-content:initialization:start -->\n保留内容';
-    writeFileSync(file, before);
-    assert.equal(syncAgentInitialization(db, file), false);
-    assert.equal(readFileSync(file, 'utf8'), before);
+    const { id, config } = createAccount(db, '沿用历史配置');
+    const sha = ensureStrategy(db, id);
+    saveDraft(db, id, { 'account-profile.md': COMPLETE_PROFILE }, sha);
+    publish(db, id, sha, '确认画像');
+    const setup = () => initializationOverview(db).accounts[0].setup;
+    db.prepare('INSERT INTO collection_credentials VALUES(?,?,?)').run(id, 'private-auth.json', `account:${id}`);
+    db.prepare("INSERT INTO account_sources(account_id,kind,source_key,name,status) VALUES(?,'keyword','停用词','停用词','paused')").run(id);
+    assert.deepEqual(setup().missing, ['keywords', 'collection_config']);
+    const legacy = validateConfig({ ...config, index: { discovery: {}, tasks: [{ type: 'videos', keyword: '园艺' }] } });
+    const setConfig = db.prepare('UPDATE accounts SET config=? WHERE id=?');
+    setConfig.run(JSON.stringify(legacy), id);
+    assert.deepEqual(setup(), { complete: true, missing: [] });
+    db.prepare("UPDATE accounts SET status='archived' WHERE id=?").run(id);
+    assert.deepEqual(setup(), { complete: false, missing: ['active_account'] });
   } finally { db.close(); }
 });

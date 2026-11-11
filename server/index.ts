@@ -25,10 +25,8 @@ import {
   context,
   ROOT,
   DATA,
-  INSTRUCTIONS,
 } from '../lib/strategies.ts';
 import { initializationOverview } from '../lib/initialization.ts';
-import { syncAgentInitialization } from '../lib/agent-state.ts';
 import { indexLogin } from '../lib/index-login.ts';
 import { CollectionStore, PROVIDERS, atomic } from '../collector/core/store.ts';
 import { collectionStatus } from '../collector/core/status.ts';
@@ -97,10 +95,10 @@ function scopedId(req: IncomingMessage) {
     throw new InputError('请先选择账号');
   return Number(raw);
 }
-function taskState(db: DatabaseSync, accountId: number, task: string) {
+function taskState(db: DatabaseSync, accountId: number, task: string, runId: number | null = null) {
   const r = db
-    .prepare('SELECT * FROM task_runs WHERE account_id=? AND task=? ORDER BY id DESC LIMIT 1')
-    .get(accountId, task) as Record<string, any> | undefined;
+    .prepare('SELECT * FROM task_runs WHERE account_id=? AND task=? AND (? IS NULL OR id=?) ORDER BY id DESC LIMIT 1')
+    .get(accountId, task, runId, runId) as Record<string, any> | undefined;
   if (r?.status === 'running' && r.pid) {
     try {
       process.kill(r.pid, 0);
@@ -190,7 +188,6 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
     if (method === 'POST') {
       const a = createAccount(db, (await body(req)).name);
       ensureStrategy(db, a.id);
-      syncAgentInitialization(db, INSTRUCTIONS);
       return json(res, account(db, a.id), 201);
     }
   }
@@ -219,7 +216,6 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
       id,
     );
     if (status === 'archived') await indexLogin.cancel(db, id);
-    syncAgentInitialization(db, INSTRUCTIONS);
     return json(res, account(db, id));
   }
   if (path === '/api/collection/config') {
@@ -243,8 +239,15 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
   }
   if (path === '/api/collection' && method === 'GET') return json(res, collectionStatus(db, a, new CollectionStore(db, DATA)));
   if (path === '/api/collection/progress' && method === 'GET') {
-    const t = taskState(db, id, 'collect');
-    return json(res, { running: t.running, progress: t.running ? Number(t.progress ?? 0) : null });
+    const requested = url.searchParams.get('run_id');
+    const runId = requested === null ? null : Number(requested);
+    if (runId !== null && (!Number.isSafeInteger(runId) || runId < 1)) throw new InputError('采集轮次编号无效');
+    const t = taskState(db, id, 'collect', runId);
+    if (runId !== null && t.id === undefined) throw new InputError('采集轮次不存在或不属于当前账号', 404);
+    return json(res, {
+      run_id: t.id ?? null, status: t.status ?? null, running: t.running,
+      progress: t.running ? Number(t.progress ?? 0) : null,
+    });
   }
   if (path === '/api/collection/limits' && method === 'PUT') {
     const b = await body(req);
@@ -400,7 +403,6 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
   const db = openDb();
   try {
     for (const a of listAccounts(db)) ensureStrategy(db, a.id);
-    if (!syncAgentInitialization(db, INSTRUCTIONS)) console.warn('AGENTS.md初始化状态尚未同步，请检查项目目录写入权限。');
   } finally {
     db.close();
   }

@@ -9,7 +9,6 @@ description: 用户要求评估自己的选题是否适合账号、检查目标�
 
 ## 输入与依据
 
-- 确认 `account_id`，通过带 `x-everyone-content-account` 的 `GET /api/context` 核对`initialized`及生效画像版本，读取返回的 `strategy_dir` 下的 `account-profile.md`。
 - 让用户提供：**标题、目标群体、主要价值（一句话）**。缺项时只询问缺项，不代填。
 - 以用户明确的信息和账号画像为依据。画像留白、受众范围不明时进行询问，不能把未写明当作不符合。
 

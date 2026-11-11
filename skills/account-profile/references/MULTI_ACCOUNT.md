@@ -2,10 +2,11 @@
 
 ## 账号操作
 
-工作台通过顶部下拉框切换账号。使用 API 时，先用 `GET /api/accounts` 获取账号列表并确认目标 `id`。表内各接口都要带 `x-everyone-content-account: <账号 ID>`。
+工作台通过顶部下拉框切换账号。使用 API 时，先用 `GET /api/accounts` 获取账号列表，按用户指定的账号确认目标 `id`。仍有歧义时请用户确认。操作单个账号的请求都要带 `x-everyone-content-account: <账号 ID>`。
 
 | 操作 | 工作台 | 本地 API |
 |---|---|---|
+| 创建账号 | 顶部下拉框旁的「＋ 新账号」，首次打开可直接创建 | `POST /api/accounts`，提交 `{"name":"账号名称"}`。从响应取得新账号的 `id`。 |
 | 归档或恢复账号 | 设置 → 账号资料 → 归档账号或恢复账号 | `PUT /api/accounts/:id`，请求体传 `{"status":"archived"}` 或 `{"status":"active"}`。路径和请求头的账号 ID 一致。 |
 | 恢复历史画像 | 设置 → 账号画像 → 版本历史 → 恢复此版本 | 从 `GET /api/strategy` 的 `history` 选出目标版本。调用 `POST /api/strategy/rollback`，请求体的 `sha` 填目标版本，`base_sha` 填读取时的当前生效版本 `sha`。 |
 | 登记已发布作品 | 已发布 → 填写作品链接和实际发布时间 → 登记作品 | `POST /api/contents`，请求体传 `published_url` 和带时区的 `published_at`，如 `2025-01-10T10:00:00+08:00`。 |
