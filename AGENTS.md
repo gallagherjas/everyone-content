@@ -32,7 +32,9 @@
 | `docs/ARCHITECTURE.md` | 系统结构、代码入口、数据流和实现约定 | 面向用户的操作教程、Agent 的任务流程 |
 | `docs/COLLECTION.md` | 采集的配置、操作、排查及相关接口 | 其他功能的操作流程、跨模块的实现说明 |
 | `docs/MULTI_ACCOUNT.md` | 账号和画像管理、发布登记与备份 | 全局路由、对话流程、内部存储实现 |
-| `skills/*/SKILL.md` | 当前任务的输入、执行步骤和输出 | 项目全局规则、其他任务的流程、参考资料全文 |
+| `skills/account-initialization/SKILL.md` | 新建账号、帐号状态为未初始化，或用户明确提供帐号画像信息或需要改变账号画像信息 | 项目全局规则、其他任务的流程、参考资料全文 |
+| `skills/topic-review/SKILL.md` | 评估选题或调整标题表达 | 同账号初始化 Skill |
+| `skills/personal-writing/SKILL.md` | 写稿、改稿。用户给予其自己写的原文或者提出写作偏好 | 同账号初始化 Skill |
 | `prompts/`、Skill 的 `assets/` 和 `references/` | 模板、样例和供任务查阅的参考资料 | 全局路由、独立的任务执行流程 |
 
 Skill 正文在 `skills/` 维护，改完后同步到 `.agents/skills/` 供 Agent 发现。项目测试会校验两份文件一致。
