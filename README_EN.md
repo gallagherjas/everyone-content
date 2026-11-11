@@ -42,13 +42,6 @@ account keywords, index authorization, filter rules
   → SQLite → workbench
 ```
 
-Key design:
-
-- **SQLite is the single source of truth.** Accounts, subscriptions, authorizations, rules, and results are isolated per `account_id`; every API request verifies ownership.
-- **Profiles are versioned via Git refs** (`refs/everyone-content/profiles/<account_id>`). Publishing never touches your branch or staging area; restoring a version creates a new commit.
-- **Collection is a deterministic program.** The agent never writes its own scraper; budgets, dedup, and storage live in planner/runner/store.
-- **Unknown stays `null`.** Source valid-dates, statistics windows, and observation times are stored separately.
-
 ## Quick start
 
 Requires **Node.js 24+**, **Git**, and an agent that can read project instructions and local skills. macOS, Linux, and Windows are supported (CI runs on both platforms); index QR login needs a local desktop.
@@ -81,7 +74,7 @@ The agent asks for the account name and positioning in the same reply. Once you 
 
 ## Multi-account
 
-An account is a local content-operations space that you name. Keywords, index authorization, filter rules, profiles, and collection results are maintained per account. Authorization scopes are `account:<id>`. Archiving keeps the history and blocks writes and scheduled collection; restoring resumes normal use.
+Each account is an independent local workspace for content operations, with a name you choose. Keywords, index authorization, filter rules, profiles, and collection results are maintained per account. New accounts start blank. Authorization is scoped to `account:<id>`, so searching for the same keyword never reuses another account's authorization or results. Archiving preserves history and stops writes and scheduled collection. Restoring an account lets you resume using it.
 
 See [accounts & profiles](docs/MULTI_ACCOUNT.md) for details.
 
