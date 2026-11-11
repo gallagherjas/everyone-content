@@ -59,9 +59,7 @@ Open an agent conversation in the project directory and try either of these requ
 
 ## Multi-account
 
-Each account is an independent local workspace for content operations, with a name you choose. Keywords, index authorization, filter rules, profiles, and collection results are maintained per account. New accounts start blank. Authorization is scoped to `account:<id>`, so searching for the same keyword never reuses another account's authorization or results. Archiving preserves history and stops writes and scheduled collection. Restoring an account lets you resume using it.
-
-See [accounts & profiles](docs/MULTI_ACCOUNT.md) for details.
+Each account is an independent local workspace for content operations, with a name you choose. Keywords, index authorization, filter rules, profiles, and collection results are maintained per account. New accounts start blank.
 
 ## Privacy & data boundaries
 
