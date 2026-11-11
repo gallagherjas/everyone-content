@@ -10,7 +10,7 @@ import { IndexLoginManager, saveIndexSession } from '../lib/index-login.ts';
 const root = mkdtempSync(join(tmpdir(), 'everyone-login-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 const session = { name: 'sessionid', value: 'synthetic-test-session', domain: '.douyin.com', path: '/', expires: -1 };
-function database() { const db = new DatabaseSync(':memory:'); migrate(db, ':memory:'); return db; }
+function database() { const db = new DatabaseSync(':memory:'); migrate(db, ':memory:'); createAccount(db, '登录测试账号'); return db; }
 function windowWith(cookies: () => Promise<any[]>, userAgent = async () => 'Test Agent') {
   let closed = false;
   return { cookies, userAgent, isClosed: () => closed, close: async () => { closed = true; } };

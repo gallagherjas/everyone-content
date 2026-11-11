@@ -1,8 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { DEFAULT_CONFIG } from '../db/migrate.ts';
 import { indexConfig } from '../collector/core/config.ts';
 import type { CollectionPolicy } from '../collector/core/discovery.ts';
-import { validateSchedules, type CollectionSchedules } from './collection-schedule.ts';
+import { defaultSchedules, validateSchedules, type CollectionSchedules } from './collection-schedule.ts';
 
 export class InputError extends Error {
   status: number;
@@ -80,10 +79,11 @@ export function createAccount(db: DatabaseSync, name: unknown) {
   if (typeof name !== 'string' || !name.trim() || name.trim().length > 80)
     throw new InputError('账号名称须为 1–80 字');
   // 新账号默认不开启采集，先配置关键词，再由用户启用。
+  const config: AccountConfig = { schedules: defaultSchedules(), index: { discovery: null, tasks: [] } };
   const id = Number(
     db
       .prepare('INSERT INTO accounts(name,config) VALUES(?,?)')
-      .run(name.trim(), JSON.stringify(DEFAULT_CONFIG)).lastInsertRowid,
+      .run(name.trim(), JSON.stringify(config)).lastInsertRowid,
   );
   return account(db, id);
 }

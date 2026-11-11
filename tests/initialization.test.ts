@@ -25,6 +25,7 @@ test('状态跟随生效画像，草稿不改状态；完整、不完整和恢�
   const before = '# 项目规则\n\n<!-- everyone-content:initialization:start -->\n初始化状态：尚未初始化。\n<!-- everyone-content:initialization:end -->\n\n## 自定义要求\n保留这段内容。\n';
   writeFileSync(instructions, before);
   try {
+    createAccount(db, '首个账号');
     const blank = ensureStrategy(db, 1);
     assert.equal(initializationStatus(db, 1).initialized, false);
     assert.equal(initializationStatus(db, 1).missing_sections.length, 7);
@@ -69,8 +70,8 @@ test('已有数据库添加状态表时保留账号与配置；无对应版本�
   const db = new DatabaseSync(':memory:');
   try {
     migrate(db, ':memory:');
+    createAccount(db, '我的账号');
     db.exec('DROP TABLE account_initialization; PRAGMA user_version=1');
-    db.prepare("UPDATE accounts SET name='我的账号'").run();
     db.prepare('UPDATE collection_limits SET daily_limit=12').run();
     migrate(db, ':memory:');
     assert.equal(db.prepare('SELECT name FROM accounts').get()!.name, '我的账号');

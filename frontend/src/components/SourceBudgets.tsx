@@ -39,7 +39,7 @@ export default function SourceBudgets() {
   };
   return <section className="panel space-y-5">
     <h2 className="font-display text-xl">来源额度</h2>
-    <p className="text-sm leading-6 text-muted">抖音指数每日请求额度跨账号共用，用于控制本地请求用量；到量后本轮采集等待下一时间点。</p>
+    <p className="text-sm leading-6 text-muted">抖音指数每日请求额度跨账号共用，用于控制本地请求用量；到量后本轮采集等待下一时间点。额度设置过高可能触发账号风控，建议不超过30次/天。</p>
     <BudgetGrid budgets={budgets ?? undefined} onLimit={save} />
     {message && <Msg tone={failed ? 'error' : 'ok'}>{message}</Msg>}
   </section>;

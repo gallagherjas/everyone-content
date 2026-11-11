@@ -17,7 +17,7 @@ const {registerAuth,configureIndex}=await import('../collector/core/settings.ts'
 const {collectionStatus}=await import('../collector/core/status.ts');
 const {defaultSchedules}=await import('../lib/collection-schedule.ts');
 const DAY=86400000,HOUR=3600000,base=Date.UTC(2026,10,7,2);
-function setup(){const db=new DatabaseSync(':memory:');migrate(db,':memory:');db.prepare('DELETE FROM account_sources').run();db.prepare('UPDATE collection_limits SET interval_ms=0').run();return {db,store:new CollectionStore(db,join(root,hash(Math.random()))) };}
+function setup(){const db=new DatabaseSync(':memory:');migrate(db,':memory:');createAccount(db,'采集测试账号');db.prepare('UPDATE collection_limits SET interval_ms=0').run();return {db,store:new CollectionStore(db,join(root,hash(Math.random()))) };}
 function account(db,id){const a=db.prepare('SELECT * FROM accounts WHERE id=?').get(id);return {...a,config:JSON.parse(a.config)};}
 function config(db,id,patch){const a=account(db,id);db.prepare('UPDATE accounts SET config=? WHERE id=?').run(JSON.stringify({...a.config,...patch}),id);}
 function auth(db,id,cookie){const file=join(root,`auth-${id}-${Math.random()}.json`);writeFileSync(file,JSON.stringify({cookie}),{mode:0o600});db.prepare('INSERT INTO collection_credentials VALUES(?,?,?)').run(id,file,`account:${id}`);}

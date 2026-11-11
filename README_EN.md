@@ -62,9 +62,11 @@ npm run build:web
 npm run web
 ```
 
-Open http://127.0.0.1:8788 — a blank default account is created on first start. Then tell your agent:
+Open http://127.0.0.1:8788. You can name and create an account in the workbench, or ask the agent to help in a conversation opened in the project directory:
 
-> I'm using this for the first time, walk me through setup
+> Start the project and show me how to use it.
+
+The agent asks for the account name and positioning in the same reply. Once you provide a name, it creates the account and guides you through the seven profile sections. For an existing account, it picks up with the missing sections.
 
 ## Core flow
 
@@ -79,7 +81,7 @@ Open http://127.0.0.1:8788 — a blank default account is created on first start
 
 ## Multi-account
 
-An account is an independent local content-operations space, not a Douyin login; a blank default account is created on first start. Keywords, index authorization, filter rules, profiles, and collection results are maintained per account — a new account starts blank and inherits nothing from other accounts. Authorization scopes are `account:<id>`; the same keyword never borrows another account's authorization or results. Archiving keeps the history and blocks writes and scheduled collection; restoring resumes normal use.
+An account is a local content-operations space that you name. Keywords, index authorization, filter rules, profiles, and collection results are maintained per account. Authorization scopes are `account:<id>`. Archiving keeps the history and blocks writes and scheduled collection; restoring resumes normal use.
 
 See [accounts & profiles](docs/MULTI_ACCOUNT.md) for details.
 

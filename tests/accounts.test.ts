@@ -16,26 +16,22 @@ process.env.EVERYONE_CONTENT_INSTRUCTIONS_PATH = join(dir, 'AGENTS.md');
 mkdirSync(process.env.EVERYONE_CONTENT_GIT_ROOT);
 execFileSync('git', ['init', '-q', process.env.EVERYONE_CONTENT_GIT_ROOT]);
 after(() => rmSync(dir, { recursive: true, force: true }));
-const { migrate, DEFAULT_CONFIG } = await import('../db/migrate.ts');
+const { migrate } = await import('../db/migrate.ts');
 const { createAccount } = await import('../lib/accounts.ts');
+const { defaultSchedules } = await import('../lib/collection-schedule.ts');
 
-test('首次安装只有空白账号和指数额度；再次开库保留用户配置', () => {
+test('首次安装只预置指数额度；再次开库保留用户创建的账号和配置', () => {
   const db = new DatabaseSync(':memory:');
   try {
     migrate(db, ':memory:');
-    const accounts = db.prepare('SELECT * FROM accounts').all();
-    assert.equal(accounts.length, 1);
-    assert.equal(accounts[0].name, '默认账号');
-    assert.equal(accounts[0].strategy_sha, null);
-    assert.deepEqual(JSON.parse(accounts[0].config as string), DEFAULT_CONFIG);
-    for (const table of ['works', 'authors', 'account_sources', 'collection_credentials', 'collection_tasks', 'collection_runs', 'collection_requests', 'contents'])
+    for (const table of ['accounts', 'works', 'authors', 'account_sources', 'collection_credentials', 'collection_tasks', 'collection_runs', 'collection_requests', 'contents'])
       assert.equal(db.prepare(`SELECT COUNT(*) n FROM ${table}`).get()!.n, 0, table);
     assert.deepEqual(db.prepare('SELECT provider FROM collection_limits').all().map(row => row.provider), ['index']);
-    const other = createAccount(db, '第二个账号');
-    assert.deepEqual(other.config, DEFAULT_CONFIG);
+    const first = createAccount(db, '我的账号');
+    assert.deepEqual(first.config, { schedules: defaultSchedules(), index: { discovery: null, tasks: [] } });
     db.prepare('UPDATE collection_limits SET daily_limit=12').run();
     migrate(db, ':memory:');
-    assert.equal(db.prepare('SELECT COUNT(*) n FROM accounts').get()!.n, 2);
+    assert.deepEqual(db.prepare('SELECT name FROM accounts').all().map(row => row.name), ['我的账号']);
     assert.equal(db.prepare('SELECT daily_limit FROM collection_limits').get()!.daily_limit, 12);
     assert.throws(() => db.prepare("INSERT INTO collection_limits VALUES('unsupported',1,1,1)").run(), /CHECK/);
   } finally { db.close(); }
@@ -81,7 +77,13 @@ test('账号隔离、画像生效、指数配置与发布登记可通过本地AP
       catch { if (attempt >= 100) throw new Error(logs); await new Promise(resolve => setTimeout(resolve, 30)); }
     }
     assert.equal((await request('/api/health')).app, 'everyone-content');
-    const [first] = await request('/api/accounts');
+    assert.deepEqual(await request('/api/accounts'), []);
+    assert.deepEqual((await request('/api/initialization')).accounts, []);
+    await request('/api/accounts', undefined, 'POST', { name: ' ' }, 400);
+    const first = await request('/api/accounts', undefined, 'POST', { name: ' 我的账号 ' }, 201);
+    assert.equal(first.name, '我的账号');
+    assert.equal((await request('/api/context', first.id)).initialized, false);
+    assert.equal((await request('/api/accounts')).length, 1);
     const second = await request('/api/accounts', undefined, 'POST', { name: '独立账号' }, 201);
     await request('/api/context', undefined, 'GET', undefined, 400);
     const overview = await request('/api/initialization');

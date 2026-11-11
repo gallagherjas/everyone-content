@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // Exercise React with a simulated DOM; no browser or live business API is used.
-test('页面缓存保留分页、草稿和滚动位置，按需更新数据，账号隔离且隐藏时停止轮询', async () => {
+test('首个账号由用户创建；页面缓存保留编辑状态，切换账号时隔离且隐藏时停止轮询', async () => {
   const frontend = fileURLToPath(new URL('../frontend/', import.meta.url));
   const require = createRequire(join(frontend, 'package.json'));
   const { Window } = await import(pathToFileURL(require.resolve('happy-dom')).href);
@@ -37,13 +37,17 @@ test('页面缓存保留分页、草稿和滚动位置，按需更新数据，�
   });
   replace('clearInterval', id => { if (!timers.delete(id)) originalClear(id); });
   const config = { schedules: Object.fromEntries(['index'].map(provider => [provider, { enabled: false, times: ['10:00'], request_limit: 10 }])), index: { discovery: null, tasks: [] } };
-  const accounts = [1, 2].map(id => ({ id, name: `账号${id}`, profile_url: '', platform: 'douyin', status: 'active', strategy_sha: null, config }));
+  const accounts = [];
   const requests = [], runs = [];
   replace('fetch', async (input, init = {}) => {
     const url = new URL(String(input), window.location.href), account = Number(init.headers?.['x-everyone-content-account'] ?? 0), method = init.method ?? 'GET';
     requests.push({ url, account, method });
     let data;
-    if (url.pathname === '/api/accounts') data = accounts;
+    if (url.pathname === '/api/accounts' && method === 'POST') {
+      data = { id: accounts.length + 1, name: JSON.parse(init.body).name, profile_url: '', platform: 'douyin', status: 'active', strategy_sha: null, config };
+      accounts.push(data);
+    }
+    else if (url.pathname === '/api/accounts') data = accounts;
     else if (url.pathname === '/api/collection') data = { tasks: [], runs, budgets: [], indexCredential: false, discovery: null };
     else if (url.pathname === '/api/contents') data = Array.from({ length: 25 }, (_, n) => ({ id: account * 1000 + n + 1, published_url: `https://www.douyin.com/video/${account}-${n + 1}`, published_at: '2026-11-09 04:00:00', metrics: null }));
     else if (url.pathname === '/api/sources') data = { keywords: [] };
@@ -82,6 +86,17 @@ test('页面缓存保留分页、草稿和滚动位置，按需更新数据，�
   });
   try {
     await act(async () => { root.render(createElement(StrictMode, null, createElement(App))); });
+    assert.equal(count('/api/collection'), 0);
+    assert.equal(window.localStorage.getItem('everyone-content-selected-account'), null);
+    assert.equal(button('创建账号').disabled, true);
+    await edit(field('新账号名称'), '账号1');
+    await click('创建账号');
+    assert.equal(window.localStorage.getItem('everyone-content-selected-account'), '1');
+    await click('＋ 新账号');
+    await edit(field('新账号名称'), '账号2');
+    await click('创建账号');
+    await switchAccount(1);
+    await navigate('采集');
     assert.equal(count('/api/collection'), 1); assert.equal(count('/api/contents'), 0);
     assert.equal(timers.size, 1);
     await navigate('已发布'); assert.equal(timers.size, 0);
@@ -101,7 +116,7 @@ test('页面缓存保留分页、草稿和滚动位置，按需更新数据，�
     window.scrollTo(0, 260);
     await navigate('设置'); await click('账号画像'); assert.equal(field('账号画像正文').value, '尚未保存的画像');
     await click('关键词'); await edit(field('新增关键词'), '新关键词'); await click('添加');
-    assert.equal(requests.filter(request => request.method === 'POST').length, 1);
+    assert.equal(requests.filter(request => request.method === 'POST' && request.url.pathname === '/api/keywords').length, 1);
     assert.equal(count('/api/contents'), contents); // Hidden views do not fetch until needed.
     await navigate('已发布'); assert.equal(count('/api/contents'), contents + 1); // POST后缓存失效，重新加载
     assert.equal(field('已发布作品链接').value, 'https://www.douyin.com/video/123'); assert.equal(scroll, 260);

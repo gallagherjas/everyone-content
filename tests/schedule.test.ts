@@ -8,6 +8,7 @@ import { runScheduledCollection } from '../lib/collection-scheduler.ts';
 const now = Date.UTC(2026, 10, 9, 1, 30);
 function setup() {
   const db = new DatabaseSync(':memory:'); migrate(db, ':memory:');
+  createAccount(db, '调度测试账号');
   const calls: { id: number; args: string[] }[] = [];
   const start = (id: number, args: string[]) => {
     calls.push({ id, args });
