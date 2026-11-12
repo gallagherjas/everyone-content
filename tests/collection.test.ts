@@ -111,7 +111,7 @@ test('有效日期更新时补采尚未满24小时的旧关键词，新增关键
   assert.equal(db.prepare('SELECT next_run_at FROM collection_tasks WHERE key=?').get(task.key).next_run_at,now+HOUR);
  }finally{db.close();}
 });
-test('六个关键词受每轮额度分批采集时显示缺失项，下一轮补齐后展示结果',async()=>{
+test('六个关键词受每轮次数分批采集时显示缺失项，下一轮补齐后展示结果',async()=>{
  const {db,store}=setup();try{
   config(db,1,{index:{discovery:null,tasks:Array.from({length:6},(_,i)=>({type:'videos',keyword:'词'+i}))}});auth(db,1,'valid');
   let calls=0;

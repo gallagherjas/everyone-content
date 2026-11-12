@@ -49,7 +49,7 @@ export function Toggle({ checked, onChange, disabled, label, hint }: {
         className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full border transition-colors ${checked ? "border-brand bg-brand" : "border-fade bg-paper"}`}>
         <span className={`absolute left-0.5 top-1/2 h-4 w-4 -translate-y-1/2 rounded-full transition-transform ${checked ? "translate-x-4 bg-paper" : "bg-fade"}`} />
       </button>
-      <span className="text-sm leading-6">{label}{hint && <span className="block text-xs text-muted">{hint}</span>}</span>
+      <span className="text-sm leading-6">{label}{hint && <span className="ml-2 text-xs text-muted">{hint}</span>}</span>
     </label>
   );
 }

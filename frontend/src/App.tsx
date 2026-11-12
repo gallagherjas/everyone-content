@@ -5,6 +5,7 @@ import CollectionPage from "./pages/Collection";
 import SettingsPage from "./pages/Settings";
 import ContentsPage from "./pages/Contents";
 import { KeepAlive, PageCacheProvider } from "./components/PageCache";
+import RulesMenu from "./components/RulesMenu";
 const TABS = [["collection", "采集"], ["contents", "已发布"], ["settings", "设置"]];
 const ACCOUNT_KEY = "everyone-content-selected-account";
 export default function App() {
@@ -36,14 +37,17 @@ export default function App() {
       <div className="flex items-center gap-4 overflow-x-auto">
         <div className="flex shrink-0 items-center gap-3"><img className="h-12 w-12 shrink-0 object-contain" src="/brand/mascot.png" alt="" aria-hidden="true" /><div><div className="font-display text-lg">everyone-content</div><p className="text-xs text-muted">{new Date().toLocaleDateString("zh-CN", { timeZone: "Asia/Shanghai", year: "numeric", month: "long", day: "numeric" })} · 北京时间</p></div></div>
         {current && <nav className="flex shrink-0 gap-1" aria-label="工作台导航">{TABS.map(([key, label]) => <PillTab key={key} active={tab === key} onClick={() => setTab(key)}>{label}</PillTab>)}</nav>}
-        {accounts && accounts.length > 0 && <div className="ml-auto flex shrink-0 items-center gap-2">
-          <label className="sr-only" htmlFor="account-switch">当前运营账号</label>
-          <select id="account-switch" className="field max-w-64" value={current?.id ?? ""} onChange={(e) => selectAccount(Number(e.target.value) || null)}>
-            <option value="" disabled>选择账号</option>
-            {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}{a.status === "archived" ? "（已归档）" : ""}</option>)}
-          </select>
-          <button className="btn shrink-0" onClick={() => setCreating(!creating)}>＋ 新账号</button>
-        </div>}
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <RulesMenu />
+          {accounts && accounts.length > 0 && <>
+            <label className="sr-only" htmlFor="account-switch">当前运营账号</label>
+            <select id="account-switch" className="field max-w-64" value={current?.id ?? ""} onChange={(e) => selectAccount(Number(e.target.value) || null)}>
+              <option value="" disabled>选择账号</option>
+              {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}{a.status === "archived" ? "（已归档）" : ""}</option>)}
+            </select>
+            <button className="btn shrink-0" onClick={() => setCreating(!creating)}>＋ 新账号</button>
+          </>}
+        </div>
       </div>
       {(firstAccount || creating) && <form onSubmit={(e) => { e.preventDefault(); create(); }} className="mt-4 flex flex-wrap gap-2 rounded-xl border border-line bg-card p-4">
         <input className="field min-w-48 flex-1" value={name} onChange={(e) => setName(e.target.value)} placeholder="输入账号名称" aria-label="新账号名称" maxLength={80} autoFocus />

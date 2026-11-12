@@ -253,7 +253,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
     const b = await body(req);
     if (!PROVIDERS.includes(b.provider)) throw new InputError('采集来源无效');
     if (!Number.isInteger(b.daily_limit) || b.daily_limit < 1 || b.daily_limit > 10000)
-      throw new InputError('每日额度须为1–10000的整数');
+      throw new InputError('每日采集次数上限须为1–10000的整数');
     db.prepare('UPDATE collection_limits SET daily_limit=? WHERE provider=?').run(b.daily_limit, b.provider);
     return json(res, { ok: true });
   }

@@ -70,7 +70,6 @@ export default function StrategyEditor({ disabled = false }: { disabled?: boolea
           <h2 className="font-display text-xl">账号画像</h2>
           {state && <span className="text-xs text-muted">版本 {state.sha.slice(0, 8)}</span>}
         </div>
-        <p className="text-sm text-muted">逐项填写画像的七个部分。不适用的项目请明确说明。</p>
         {state && <p className="text-sm" aria-label="画像完整性">生效画像：{state.initialization?.initialized ? '完整' : '待补充'}</p>}
         {state && <p className="text-xs text-muted">{draftCompletion.initialized
           ? '当前编辑内容已填写完整。'
@@ -127,7 +126,7 @@ export default function StrategyEditor({ disabled = false }: { disabled?: boolea
       </section>
       {state && (
         <section className="panel">
-          <h3 className="font-display text-lg">版本历史</h3>
+          <h2 className="font-display text-xl">版本历史</h2>
           <div className="mt-3 divide-y divide-line">
             {state.history.map((item, i) => (
               <div

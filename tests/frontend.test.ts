@@ -120,6 +120,8 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     await navigate('设置'); await click('账号画像'); assert.equal(field('账号画像正文').value, '尚未保存的画像');
     await click('关键词'); await edit(field('新增关键词'), '新关键词'); await click('添加');
     assert.equal(requests.filter(request => request.method === 'POST' && request.url.pathname === '/api/keywords').length, 1);
+    await edit(field('新增排除关键词'), '广告'); await act(async () => { window.document.querySelector('button[aria-label="添加排除关键词"]').click(); }); // 排除词增删即时保存并重新筛选
+    assert.deepEqual(accounts[0].config.index.discovery.excludeKeywords, ['广告']);
     assert.equal(count('/api/contents'), contents); // Hidden views do not fetch until needed.
     await navigate('已发布'); assert.equal(count('/api/contents'), contents + 1); // POST后缓存失效，重新加载
     assert.equal(field('已发布作品链接').value, 'https://www.douyin.com/video/123'); assert.equal(scroll, 260);
@@ -136,10 +138,13 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     await act(async () => { [...timers.values()][0](); });
     assert.equal(count('/api/collection'), collectionLoads + 1); // 轮询发现新记录后重新加载
     await navigate('设置'); await click('采集设置');
+    const rules = visible('section').find(s => [...s.querySelectorAll('h3')].some(h => h.textContent.startsWith('筛选参数'))); // 采集设置区各部分合用一个面板，须按标签定位输入框
+    await edit([...rules.querySelectorAll('label')].find(l => l.textContent.startsWith('话题指数下限')).querySelector('input'), '3');
     const saveRules = button('保存并重新筛选');
     assert.equal(saveRules.disabled, false);
     await act(async () => { saveRules.click(); });
-    assert.deepEqual(accounts[0].config.index.discovery.excludeKeywords, []);
+    assert.deepEqual(accounts[0].config.index.discovery.excludeKeywords, ['广告']); // 保存筛选参数不覆盖关键词页已存的排除词
+    assert.equal(accounts[0].config.index.discovery.minTopicIndex, 3);
     assert.equal(accounts[0].config.index.discovery.minVideoLikes, 100);
     assert.equal(button('保存并重新筛选').disabled, true);
   } finally {

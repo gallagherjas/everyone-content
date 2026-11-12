@@ -19,7 +19,7 @@ const { migrate } = await import('../db/migrate.ts');
 const { createAccount } = await import('../lib/accounts.ts');
 const { defaultSchedules } = await import('../lib/collection-schedule.ts');
 
-test('首次安装只预置指数额度；再次开库保留用户创建的账号和配置', () => {
+test('首次安装只预置指数每日采集次数上限；再次开库保留用户创建的账号和配置', () => {
   const db = new DatabaseSync(':memory:');
   try {
     migrate(db, ':memory:');

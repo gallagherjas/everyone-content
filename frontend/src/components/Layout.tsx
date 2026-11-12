@@ -9,7 +9,8 @@ export function Page({ head, items, active, onPick, children }: {
   return (
     <div className="flex gap-8">
       <aside className="w-48 shrink-0">
-        <div className="sticky top-8 flex flex-col gap-1">
+          {/* 粘附点须在固定顶栏(约89px)之下,否则侧栏钻进顶栏被半透明背景盖住,看起来像随页面滚动 */}
+          <div className="sticky top-28 flex flex-col gap-1">
           <SideHead>{head}</SideHead>
           {items.map((item) => (
             <SideItem key={item.key} active={active === item.key} onClick={() => onPick(item.key)} label={item.label} count={item.count} />
