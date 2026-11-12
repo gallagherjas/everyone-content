@@ -1,12 +1,8 @@
 # 在 everyone-content 中工作
 
-<!-- everyone-content:initialization:start -->
-初始化状态：尚未初始化完成。
-<!-- everyone-content:initialization:end -->
-
 ## 初始化
 
-当本文件最上方的状态为初始化未完成时，先读[账号初始化](skills/initialization/SKILL.md)，此时无论用户问什么，除非是跟初始化有关的，否则在首次回答末尾都加上‘项目尚未初始化，要现在开始吗？’，语言跟随用户语言。之后的回答不需要加上这一句。
+先确认初始化状态。以 `GET /api/initialization` 的 `setup.complete` 为准（服务未启动时视为未完成）。未完成时先读[账号初始化](skills/initialization/SKILL.md)，除初始化相关问题外，在首次回答末尾加上“项目尚未初始化，要现在开始吗？”，语言跟随用户语言；之后的回答不加。
 
 ## 使用场景
 
