@@ -9,9 +9,11 @@ description: 创建或管理账号，填写、更新或恢复账号画像。也�
 
 按[账号操作](references/MULTI_ACCOUNT.md#账号操作)确认目标账号和 API 请求头。管理账号、恢复版本或登记作品时按其中对应步骤操作。用户要求备份时读[备份](references/MULTI_ACCOUNT.md#备份)。
 
-用户要新建账号时，按[账号操作](references/MULTI_ACCOUNT.md#账号操作)建号，记下返回的 `id`。用户同时要填写画像时，在同一轮按下文展示所需模板。账号名称尚未提供时一并询问。拿到名称即可建号，画像可随后补齐。
+用户要初始化时，在同一轮回答中一次性索取账号名称，以及展示`prompts/account-profile.md`，在同一条回复中直接展示模板原文。
 
-## 填写画像
+用户要新建账号时，按[账号操作](references/MULTI_ACCOUNT.md#账号操作)建号，记下返回的 `id`。在同一轮按下文展示所需模板。账号名称尚未提供时一并询问。
+
+## 填写与修改画像
 
 已有账号时，用 `GET /api/strategy` 读取生效画像 `published`、草稿 `draft` 和当前生效版本 `sha`。结合生效画像、草稿和本轮用户提供的信息判断缺项。接口返回的 `missing_sections` 只反映生效画像。
 
