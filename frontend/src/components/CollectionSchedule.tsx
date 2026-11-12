@@ -40,7 +40,7 @@ function TimeSelect({ name, times, disabled, onChange }: {
 }
 
 const sources = {
-  index: { name: '抖音指数', hint: '按关键词发现话题、视频和达人候选。' },
+  index: { name: '抖音指数', hint: '按关键词发现话题、视频和达人指数。' },
 };
 type Settings = Pick<AccountConfig, 'schedules'>;
 const settingsOf = (account: Account): Settings => ({ schedules: account.config.schedules });

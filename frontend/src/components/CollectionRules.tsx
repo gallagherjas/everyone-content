@@ -9,7 +9,6 @@ const limits = [
   ['minVideoLikes', '点赞数下限', 100, 100, undefined],
   ['maxTopics', '话题保留数', 3, 1, 5],
   ['maxVideos', '视频保留数', 40, 1, 200],
-  ['maxAuthors', '达人保留数', 5, 1, 20],
 ] as const;
 function draftOf(index: IndexConfig): IndexConfig {
   const policy = index.discovery ?? {};

@@ -43,7 +43,7 @@ everyone-content/
 
 原始响应与解析数据压缩保存于 `runtime/collection/objects/`，SQLite 记录文件路径和 SHA256，并保存作品、作者、话题及指标观测。采集时间、来源有效日期和统计窗口分别记录。未知指标保留 `null`，平台 ID 以字符串保存。数据库时间以 UTC 空格格式存储，界面按北京时间显示。
 
-发现结果由关键词视频、话题关联视频和榜单数据生成。达人候选来自入选视频及话题点赞榜、评论榜。[结果生成](../collector/core/discovery.ts) · [采集配置和筛选](../skills/collection/references/COLLECTION.md)
+发现结果由各关键词搜索的视频合并生成。达人指数按入选视频作者的近7天指数归类统计。[结果生成](../collector/core/discovery.ts) · [采集配置和筛选](../skills/collection/references/COLLECTION.md)
 
 ## 账号隔离与画像版本
 

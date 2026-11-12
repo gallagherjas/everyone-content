@@ -64,13 +64,10 @@ export function indexSelection(store: CollectionStore, a: any): Discovery {
   if(current.length===d.keywords.length)for(const capture of current)d.ingest(capture);
   const videos=captures(store,a.id,'videos',d.keywords).filter((c: any)=>c.run.version===end);
   for(const capture of videos)d.ingest(capture);
-  const selected=d.topics(),relations=captures(store,a.id,'topic_relation',selected.map((t: any)=>t.id)).filter((c: any)=>!dates||c.run.version===dates.valid_week);
-  for(const capture of relations)d.ingest(capture);
-  d.ready=current.length===d.keywords.length&&videos.length===d.keywords.length&&relations.length===selected.length;
+  d.ready=current.length===d.keywords.length&&videos.length===d.keywords.length;
   d.pending={
     topicSearch:d.keywords.filter(k=>!current.some((c: any)=>c.keyword===k)),
     videos:d.keywords.filter(k=>!videos.some((c: any)=>c.keyword===k)),
-    topicRelations:selected.filter((t: any)=>!relations.some((c: any)=>c.id===t.id)).map((t: any)=>t.name),
   };
   return d;
 }
@@ -89,14 +86,6 @@ export function rebuildAccount(store: CollectionStore, a: any): Discovery {
       topic_name:topic.name,topic_index:topic.index,item_cnt:topic.row.item_cnt??null,
       digg_cnt:topic.row.digg_cnt??null,play_read_cnt:topic.row.play_read_cnt??null,
     },topic.window);
-    if (topic.relation&&report.ready) {
-      store.observation(topic.relation.run,'topic',topic.id,'topic_relation',{
-        item_ids:report.videos.filter((v: any)=>v.sources.some((s: any)=>s.capture===topic.relation)).map((v: any)=>v.id),
-        digg_author_list:topic.boards.likes,comment_author_list:topic.boards.comments,
-      },topic.relation.window);
-      for (const rows of [topic.boards.likes,topic.boards.comments]) for (const row of rows)
-        identity(store,topic.relation.run,'index_author',row.id,{author_name:row.name});
-    }
   }
   for (const video of report.videos) {
     const capture=video.metric.capture, facts=video.metric.facts;
@@ -120,7 +109,7 @@ export function rebuildAccount(store: CollectionStore, a: any): Discovery {
 export function selectionView(d: Discovery): any {
   const report=d.report();
   return {...report,pending:d.pending,
-    topics:report.topics.map(({id,name,index,window,boards}:any)=>({id,name,index,window,boards})),
+    topics:report.topics.map(({id,name,index,window}:any)=>({id,name,index,window})),
     videos:report.videos.map(({sources,metric,...video}:any)=>({...video,sources:sources.map(({capture}:any)=>({runId:capture.run.id,type:capture.type,keyword:capture.keyword,topicId:capture.id,window:capture.window}))})),
   };
 }
