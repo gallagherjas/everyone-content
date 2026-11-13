@@ -7,7 +7,28 @@ import { createCipheriv } from 'node:crypto';
 import { decode, parseJson, PATHS, requestFor, unwrap, validateData, semanticHash } from '../../collector/sources/douyin-index/protocol.ts';
 import { ReadClient, loadAuth } from '../../collector/sources/douyin-index/client.ts';
 
-const dates={topic:{valid_day:'20261105',valid_week:'20261101'}};
+const dates={topic:{valid_day:'20261105',valid_week:'20261101'},author:{datetime:'20261104'}};
+test('达友域请求构造与校验：日期GET、搜索昵称、作品30天窗口、ID仅限小写字母数字',()=>{
+ assert.equal(requestFor({type:'author_dates'},dates).method,'GET');
+ assert.deepEqual(requestFor({type:'author_search',keyword:'AI 造物笔记'},dates).payload,{keyword:'AI 造物笔记',total:'20'});
+ assert.deepEqual(requestFor({type:'author_works',id:'diguser1'},dates).payload,{user_id:'diguser1',start_date:'20261006',end_date:'20261104'});
+ assert.deepEqual(requestFor({type:'author_core',id:'diguser1'},dates).payload,{user_id:'diguser1'});
+ assert.throws(()=>requestFor({type:'author_works',id:'MS4wSecUid'},dates),/author_id/);
+ assert.throws(()=>requestFor({type:'author_works',id:'diguser1'},{author:{}}),/valid_date/);
+ assert.throws(()=>requestFor({type:'author_search',keyword:'  '},dates),/invalid_keyword/);
+ validateData('author_dates',{datetime:'20261104'});
+ validateData('author_search',{userlist:[]});
+ validateData('author_info',{user_id:'diguser1',fans_count:'1'}, {id:'diguser1'});
+ validateData('author_core',{fanslistday:[],likelistday:[],fans_info:{},like_info:{}});
+ validateData('author_works',{like_list:[],comment_list:[],share_list:[],follow_list:[],index_list:[],create_time_list:[]});
+ assert.throws(()=>validateData('author_core',{}),/schema_error/);
+ assert.throws(()=>validateData('author_info',{user_id:'other',fans_count:'1'},{id:'diguser1'}),/schema_error/);
+ const same=(a: any,b: any)=>semanticHash('author_works',a)===semanticHash('author_works',b);
+ assert.equal(same({like_list:[{item_id:'1',like_cnt:'5'}],comment_list:[],share_list:[],follow_list:[],index_list:[],create_time_list:[]},
+  {like_list:[{item_id:'1',like_cnt:'5',extra:'noise'}],comment_list:[],share_list:[],follow_list:[],index_list:[],create_time_list:[]}),true);
+ assert.equal(same({like_list:[{item_id:'1',like_cnt:'5'}],comment_list:[],share_list:[],follow_list:[],index_list:[],create_time_list:[]},
+  {like_list:[{item_id:'1',like_cnt:'9'}],comment_list:[],share_list:[],follow_list:[],index_list:[],create_time_list:[]}),false);
+});
 test('官方周窗口正确生成；阻止任意URL与非法ID',()=>{
  assert.deepEqual(requestFor({type:'topic_relation',id:'123'},dates).payload,{app_name:'aweme',topic_ids:['123'],begin_date:'20261026',end_date:'20261101'});
  assert.equal(requestFor({type:'videos',keyword:'企业AI',days:7},dates).payload.dateType,7);

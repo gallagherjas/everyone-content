@@ -35,12 +35,14 @@ async function execute(store: CollectionStore,run: any,client: any,clock: ()=>nu
   if (run.provider !== 'index') return snapshotExecute(store,run,client,clock);
   const spec=JSON.parse(run.request);
   const credential=store.db.prepare('SELECT c.auth_path FROM collection_credentials c JOIN collection_task_accounts a ON a.account_id=c.account_id WHERE a.task_key=? AND c.scope=? LIMIT 1').get(run.task_key,run.scope) as any;
-  const lastDates=store.latest(taskKey('index',run.scope,{type:'topic_dates'}));
-  const dates=lastDates?{topic:store.data(lastDates)}:{};
-  if(spec.type!=='topic_dates'&&!dates.topic)throw new Error('source_dates_missing');
-  const version=spec.type==='topic_dates'?new Date(clock()).toISOString().slice(0,10):spec.type==='topic_relation'?dates.topic.valid_week:dates.topic.valid_day;
+  // 两个数据域各自先取有效日：话题域(topic_*/videos)与达友域(author_*)，日期任务本身不依赖前置。
+  const domain=['topic_dates','author_dates'].includes(spec.type)?null:spec.type.startsWith('author_')?'author':'topic';
+  const datesRun=domain?store.latest(taskKey('index',run.scope,{type:`${domain}_dates`})):null;
+  const dates={topic:domain==='topic'&&datesRun?store.data(datesRun):null,author:domain==='author'&&datesRun?store.data(datesRun):null};
+  if(domain&&!dates[domain])throw new Error('source_dates_missing');
+  const version=domain===null?new Date(clock()).toISOString().slice(0,10):spec.type==='topic_relation'?dates.topic.valid_week:domain==='author'?dates.author.datetime:dates.topic.valid_day;
   const previous=store.latest(run.task_key);
-  if(spec.type!=='topic_dates'&&previous?.version===version)return {cached:previous,version};
+  if(domain===null?false:previous?.version===version)return {cached:previous,version};
   const auth=loadAuth(credential?.auth_path,{});
   const req=requestFor(spec,dates);
   const response=await new ReadClient(auth,{fetchImpl:client,intervalMs:1000,sleep:async()=>{}}).read(spec,req);
@@ -81,7 +83,10 @@ export async function runCollection(store: CollectionStore,options: RunOptions={
     options.progress?.(Math.min(99,Math.round(done*100/total)));
     if(Object.values(counts).reduce((a,b)=>a+b,0)>=(options.requestLimit??Infinity))break;
     if((options.only&&task.provider!==options.only)||exhausted.has(task.provider))continue;
-    if(task.provider==='index'&&task.operation!=='topic_dates'&&!store.latest(taskKey('index',task.scope,{type:'topic_dates'})))continue;
+    if(task.provider==='index'&&!['topic_dates','author_dates'].includes(task.operation)){
+      const datesType=task.operation.startsWith('author_')?'author_dates':'topic_dates';
+      if(!store.latest(taskKey('index',task.scope,{type:datesType})))continue;
+    }
     if((counts[task.provider]??0)>=(store.db.prepare('SELECT per_tick FROM collection_limits WHERE provider=?').get(task.provider) as any).per_tick)continue;
     if((store.db.prepare('SELECT paused FROM collection_provider_state WHERE provider=? AND scope=?').get(task.provider,task.scope) as any)?.paused)continue;
     const assigned=new Set(store.accounts(task.key).map((a: any)=>a.id));

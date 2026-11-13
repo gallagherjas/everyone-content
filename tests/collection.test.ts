@@ -15,6 +15,7 @@ const {runCollection}=await import('../collector/core/runner.ts');
 const {planCollection}=await import('../collector/core/planner.ts');
 const {registerAuth,configureIndex}=await import('../collector/core/settings.ts');
 const {collectionStatus}=await import('../collector/core/status.ts');
+const {bloggerOverview,bloggerDetail}=await import('../collector/core/bloggers.ts');
 const {defaultSchedules}=await import('../lib/collection-schedule.ts');
 const DAY=86400000,HOUR=3600000,base=Date.UTC(2026,10,7,2);
 function setup(){const db=new DatabaseSync(':memory:');migrate(db,':memory:');createAccount(db,'采集测试账号');db.prepare('UPDATE collection_limits SET interval_ms=0').run();return {db,store:new CollectionStore(db,join(root,hash(Math.random()))) };}
@@ -214,5 +215,42 @@ test('指数返回登录页时暂停本账号授权范围，不将HTML当作采�
   const state=db.prepare("SELECT paused,error FROM collection_provider_state WHERE provider='index' AND scope='account:1'").get();
   assert.equal(state.paused,1);assert.equal(state.error,'login_required');
   assert.equal(db.prepare('SELECT COUNT(*) n FROM works').get().n,0);
+ }finally{db.close();}
+});
+test('博主链路：昵称搜索解析为博主，作品按指数落库并进入详情视图', async () => {
+ const {db,store}=setup();try{
+  config(db,1,{index:{discovery:null,tasks:[]}});
+  db.prepare("INSERT INTO account_sources(account_id,kind,source_key,name) VALUES(1,'keyword','ai教程','ai教程')").run();
+  auth(db,1,'valid');
+  db.prepare("INSERT INTO account_sources(account_id,kind,source_key,name) VALUES(1,'blogger_search','AI 造物笔记','AI 造物笔记')").run();
+  const workRow=(id: string,text: string,likes: number,extra={})=>({item_id:id,video_text:text,like_cnt:String(likes),coment_cnt:'5',share_cnt:'2',follow_cnt:'1',rank:1,create_time:'20261101',video_url:`https://www.douyin.com/video/${id}`,...extra});
+  const works={like_list:[workRow('7701','作品甲 #ai教程',100),workRow('7702','作品乙',60)],comment_list:[],share_list:[],
+   follow_list:[],index_list:[workRow('7701','作品甲 #ai教程',100)],create_time_list:[workRow('7702','作品乙',60,{create_time:'20261103'})]};
+  const fetchImpl=async(input,init)=>{
+   const p=new URL(String(input)).pathname;
+   if(p.endsWith('get_topic_valid_date'))return json({data:{valid_day:'20261105',valid_week:'20261101'}});
+   if(p.endsWith('get_greater_users_valid_date'))return json({data:{datetime:'20261104'}});
+   if(p.endsWith('query_topic'))return json({data:{topic_list:[]}});
+   if(p.endsWith('itemQuery'))return json({data:{data:[]}});
+   if(p.endsWith('get_sug_great_user_list')){assert.equal(JSON.parse(init.body).keyword,'AI 造物笔记');
+    return json({data:{userlist:[{user_id:'diguser1',user_name:'别的达人'},{user_id:'diguser2',user_name:'AI 造物笔记',follow_count:'13277',like_count:'23973',item_count:'33',first_tag_name:'科技',second_tag_name:'前沿科技',aweme_url:'https://www.douyin.com/user/MS4wLjABAAAAWX1?src=todo'}]}});}
+   if(p.endsWith('get_great_user_top_video')){assert.equal(JSON.parse(init.body).user_id,'diguser2');return json({data:works});}
+   throw new Error('unexpected '+p);
+  };
+  const summary=await runCollection(store,{accountIds:[1],only:'index',clock:()=>base,fetchImpl,sleep:async()=>{}});
+  assert.equal(summary.failed,0);
+  const row=db.prepare("SELECT * FROM account_sources WHERE kind='blogger'").get();
+  assert.equal(row.source_key,'diguser2');assert.equal(row.name,'AI 造物笔记');
+  assert.deepEqual(JSON.parse(row.note),{secUid:'MS4wLjABAAAAWX1',fans:13277,likes:23973,items:33,tag1:'科技',tag2:'前沿科技',avatar:null});
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM account_sources WHERE kind='blogger_search'").get().n,0);
+  const work=db.prepare("SELECT w.url,w.title,w.author_id FROM works w JOIN account_works a ON a.work_id=w.id WHERE a.account_id=1 AND a.reason='index:blogger'").get();
+  assert.equal(work.url,'https://www.douyin.com/video/7701');assert.equal(work.title,'作品甲 #ai教程');assert.equal(work.author_id,'MS4wLjABAAAAWX1');
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM collection_observations WHERE kind='work' AND dimension='author_works'").get().n,2);
+  const overview=bloggerOverview(db,store,1);
+  assert.equal(overview.length,1);assert.equal(overview[0].worksCount,2);assert.equal(overview[0].profile.fans,13277);
+  const detail=bloggerDetail(store,1,row);
+  assert.deepEqual(detail.works.map(w=>w.id),['7701','7702']); // 点赞 100 > 60
+  assert.equal(detail.works[0].likes,100);assert.equal(detail.works[0].url,'https://www.douyin.com/video/7701');
+  assert.equal(detail.works[1].publishedAt,'2026-11-03T00:00:00+08:00');assert.equal(detail.trend,null);
  }finally{db.close();}
 });

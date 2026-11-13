@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
-const RESOURCES = ['collection', 'monitor', 'sources'] as const;
+const RESOURCES = ['collection', 'monitor', 'sources', 'bloggers'] as const;
 type Resource = typeof RESOURCES[number];
-const initialVersions = { collection: 0, monitor: 0, sources: 0 };
+const initialVersions = { collection: 0, monitor: 0, sources: 0, bloggers: 0 };
 const Changes = createContext({ versions: initialVersions, invalidate: (_resources?: readonly Resource[]) => {} });
 const Visible = createContext(true);
 

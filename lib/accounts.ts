@@ -30,11 +30,12 @@ export interface Account {
 export interface Source {
   id: number;
   account_id: number;
-  kind: 'keyword';
+  kind: 'keyword' | 'blogger' | 'blogger_search';
   source_key: string;
   name: string;
   status: string;
   note: string;
+  options: string;
 }
 export function account(db: DatabaseSync, id: number): Account {
   const r = db.prepare('SELECT * FROM accounts WHERE id=?').get(id) as

@@ -3,7 +3,7 @@ import { upsertWork,upsertAuthor } from '../../lib/works.ts';
 import { linkWork, type AccountConfig } from '../../lib/accounts.ts';
 import { Discovery,normalize } from './discovery.ts';
 import type { CollectionStore } from './store.ts';
-function identity(store: CollectionStore,run: any,namespace: string,id: any,row: any={}) {
+export function identity(store: CollectionStore,run: any,namespace: string,id: any,row: any={}) {
   if(!id)return;
   // Only an explicit sec_uid or profile link in the same response can connect ID namespaces.
   const sec=row.sec_uid??Object.values(row).filter((v: any)=>typeof v==='string').map((v: string)=>v.match(/(?:\/user\/|sec_uid=)(MS4wLjAB[\w-]+)/)?.[1]).find(Boolean);
@@ -73,7 +73,7 @@ export function indexSelection(store: CollectionStore, a: any): Discovery {
   };
   return d;
 }
-function published(value: any): string {
+export function published(value: any): string {
   if (value === null || value === undefined || value === '') return '';
   let ms;
   if (/^\d+$/.test(String(value))) ms = Number(value) * (Number(value) < 1e11 ? 1000 : 1);

@@ -35,7 +35,7 @@ test('首次安装预置各来源采集次数上限；再次开库保留用户�
   } finally { db.close(); }
 });
 
-test('v2数据库升级v3：移除博主采集源与作品快照表，关键词保留', () => {
+test('v2库升级：旧博主采集源在v3移除、关键词保留，v5重新放开博主登记并加开关列', () => {
   const db = new DatabaseSync(':memory:');
   try {
     db.exec(`CREATE TABLE accounts (id INTEGER PRIMARY KEY, name TEXT NOT NULL, platform TEXT NOT NULL DEFAULT 'douyin', profile_url TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', config TEXT NOT NULL, strategy_sha TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
@@ -47,7 +47,11 @@ test('v2数据库升级v3：移除博主采集源与作品快照表，关键词�
     migrate(db, ':memory:');
     assert.deepEqual(db.prepare('SELECT source_key FROM account_sources').all().map(row => row.source_key), ['效率工具']);
     assert.equal(db.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE name='snapshots'").get()!.n, 0);
-    assert.throws(() => db.prepare("INSERT INTO account_sources(account_id,kind,source_key,name) VALUES(1,'blogger','x','x')").run(), /CHECK/);
+    // v5：博主以达友 user_id 重新登记，options 存每博主采集开关。
+    db.prepare("INSERT INTO account_sources(account_id,kind,source_key,name,options) VALUES(1,'blogger','diguser1','博主甲','{\"core\":true}')").run();
+    db.prepare("INSERT INTO account_sources(account_id,kind,source_key,name) VALUES(1,'blogger_search','昵称待解析','昵称待解析')").run();
+    assert.equal(db.prepare("SELECT options FROM account_sources WHERE kind='blogger'").get()!.options, '{"core":true}');
+    assert.throws(() => db.prepare("INSERT INTO account_sources(account_id,kind,source_key,name) VALUES(1,'other','x','x')").run(), /CHECK/);
   } finally { db.close(); }
 });
 

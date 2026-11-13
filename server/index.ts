@@ -32,6 +32,7 @@ import { monitorOverview } from '../lib/monitor.ts';
 import { CollectionStore, PROVIDERS, atomic } from '../collector/core/store.ts';
 import { collectionStatus } from '../collector/core/status.ts';
 import { planCollection } from '../collector/core/planner.ts';
+import { bloggerOverview, bloggerDetail } from '../collector/core/bloggers.ts';
 import { runScheduledCollection } from '../lib/collection-scheduler.ts';
 import { writingCorpus, saveWriting } from '../lib/writing.ts';
 const PORT = Number(process.env.WEB_PORT ?? 8788),
@@ -320,6 +321,40 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
     );
     matchKeywords(db, a);
     return json(res, { ok: true, name, message: '已加入本账号；公共历史数据已关联。' }, 201);
+  }
+  if (path === '/api/bloggers' && method === 'GET')
+    return json(res, bloggerOverview(db, new CollectionStore(db, DATA), id));
+  if (path === '/api/bloggers' && method === 'POST') {
+    activeAccount(db, id);
+    const keyword = text((await body(req)).keyword, '博主昵称', 80).trim();
+    if (!keyword) throw new InputError('博主昵称不能为空');
+    if (sources(db, id).some(s => s.kind === 'blogger_search' && s.source_key === keyword))
+      throw new InputError('该昵称已在解析中', 409);
+    db.prepare("INSERT INTO account_sources(account_id,kind,source_key,name,note) VALUES(?,'blogger_search',?,?,'')").run(id, keyword, keyword);
+    // 立即触发一轮采集解析昵称；若已有采集在跑，搜索任务留给那轮或下一次。
+    try { startTask(db, id, 'collect'); } catch { /* 采集进行中，解析顺延 */ }
+    return json(res, { ok: true, message: '已登记昵称，解析完成后将出现在列表中。' }, 201);
+  }
+  const blogger = path.match(/^\/api\/bloggers\/(\d+)$/);
+  if (blogger && ['GET', 'PUT', 'DELETE'].includes(method || '')) {
+    const row = sources(db, id).find(s => s.id === Number(blogger[1]) && s.kind !== 'keyword');
+    if (!row) throw new InputError('博主不存在', 404);
+    if (method === 'DELETE') {
+      db.prepare('DELETE FROM account_sources WHERE id=? AND account_id=?').run(row.id, id);
+      return json(res, { ok: true });
+    }
+    if (method === 'GET') return json(res, bloggerDetail(new CollectionStore(db, DATA), id, row));
+    const b = await body(req), status = b.status ?? row.status;
+    if (!['ready', 'paused'].includes(status)) throw new InputError('状态必须为 ready / paused');
+    let options = row.options;
+    if (b.core !== undefined || b.info !== undefined) {
+      let current: any = {};
+      try { current = JSON.parse(row.options || '{}'); } catch { /* 忽略历史脏值，重写为合法开关 */ }
+      options = JSON.stringify({ ...current, ...(b.core !== undefined ? { core: !!b.core } : {}), ...(b.info !== undefined ? { info: !!b.info } : {}) });
+    }
+    db.prepare('UPDATE account_sources SET status=?,name=?,options=? WHERE id=? AND account_id=?').run(
+      status, b.name === undefined ? row.name : text(b.name, '名称', 100), options, row.id, id);
+    return json(res, { ok: true });
   }
   const source = path.match(/^\/api\/sources\/(\d+)$/);
   if (source && ['PUT', 'DELETE'].includes(method || '')) {

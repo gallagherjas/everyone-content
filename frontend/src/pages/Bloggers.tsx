@@ -1,0 +1,135 @@
+import { useCallback, useEffect, useState } from "react";
+import { useApi, fmtNum, fmtTime, relTime } from "../api";
+import { Page } from "../components/Layout";
+import { ConfirmBtn, Msg, Toggle } from "../components/Common";
+import { useCachedLoad } from "../components/PageCache";
+
+interface BloggerRow {
+  id: number; kind: "blogger" | "blogger_search"; userId?: string; name: string; status: string; note?: string; resolving?: boolean;
+  profile?: { secUid: string | null; fans: number | null; likes: number | null; items: number | null; tag1: string | null; tag2: string | null; avatar: string | null; intro?: string };
+  options?: { core?: boolean; info?: boolean }; worksCount?: number; lastCollectAt?: string | null;
+}
+interface WorkRow { id: string; title: string; likes: number | null; comments: number | null; shares: number | null; follows: number | null; publishedAt: string | null; url: string }
+interface Trend { fans: { date: string; count: number | null }[]; likes: { date: string; count: number | null }[]; summary: { newFansDay: number | null; newFansWeek: number | null } }
+interface Detail extends BloggerRow { works: WorkRow[]; trend: Trend | null }
+
+/** 粉丝日增单序列柱状图(近14天),复用监控页柱体的视觉口径 */
+function FanBars({ fans }: { fans: Trend["fans"] }) {
+  const rows = fans.slice(-14);
+  const max = Math.max(1, ...rows.map(r => r.count ?? 0));
+  return <div>
+    <div className="flex h-20 items-end gap-1 border-b border-line">
+      {rows.map(r => <div key={r.date} title={`${r.date.slice(5)} 净增 ${fmtNum(r.count)}`}
+        className="min-w-0 flex-1 rounded-t-[3px] bg-brand/80" style={{ height: `${Math.max(2, ((r.count ?? 0) / max) * 100)}%` }} />)}
+    </div>
+    <div className="mt-1.5 flex justify-between text-[10px] text-faint">
+      <span>{rows[0]?.date.slice(5)}</span><span>峰值 {fmtNum(max)}</span><span>{rows.at(-1)?.date.slice(5)}</span>
+    </div>
+  </div>;
+}
+
+export default function BloggersPage() {
+  const api = useApi();
+  const [rows, setRows] = useState<BloggerRow[]>([]);
+  const [detail, setDetail] = useState<Detail | null>(null);
+  const [active, setActive] = useState<string>("");
+  const [keyword, setKeyword] = useState("");
+  const [busy, setBusy] = useState(false), [failed, setFailed] = useState(false), [message, setMessage] = useState("");
+  const load = useCallback(() => api<BloggerRow[]>("/api/bloggers").then(setRows).catch(() => setRows([])), [api]);
+  useCachedLoad('bloggers', load);
+  const loadDetail = useCallback((id: number) => api<Detail>(`/api/bloggers/${id}`).then(setDetail).catch(e => { setDetail(null); setFailed(true); setMessage(String(e)); }), [api]);
+  useEffect(() => { setDetail(null); if (active && !active.startsWith("s")) loadDetail(Number(active)); }, [active, loadDetail]);
+  // 有待解析昵称时轮询，解析完成自动出现博主行。
+  useEffect(() => {
+    if (!rows.some(r => r.resolving)) return;
+    const timer = setTimeout(load, 3000);
+    return () => clearTimeout(timer);
+  }, [rows, load]);
+  const act = async (fn: () => Promise<unknown>, text: string) => {
+    if (busy) return; setBusy(true); setFailed(false); setMessage("");
+    try { await fn(); setMessage(text); } catch (e) { setFailed(true); setMessage(String(e)); } finally { setBusy(false); }
+  };
+  const bloggers = rows.filter(r => r.kind === "blogger"), pending = rows.filter(r => r.kind === "blogger_search");
+  const current = bloggers.find(b => String(b.id) === active);
+
+  return <Page head="博主" active={active} onPick={setActive} items={[
+    ...bloggers.map(b => ({ key: String(b.id), label: b.name })),
+    ...pending.map(p => ({ key: `s${p.id}`, label: `${p.name}（解析中）` })),
+  ]}>
+    <div className="space-y-5">
+      <section className="panel">
+        <h3 className="font-semibold text-lg">添加博主</h3>
+        <p className="mt-2 text-sm text-muted">输入抖音昵称，经抖音指数搜索定位后开始追踪；添加消耗 1 次额度，之后每个博主每天消耗 1 次作品采集。</p>
+        <div className="mt-3 flex gap-2">
+          <input className="field min-w-0 flex-1" value={keyword} onChange={e => setKeyword(e.target.value)} placeholder="例如：AI 造物笔记" aria-label="博主昵称" maxLength={80}
+            onKeyDown={e => { if (e.key === "Enter" && !e.nativeEvent.isComposing) void act(async () => { await api("/api/bloggers", { method: "POST", body: JSON.stringify({ keyword }) }); setKeyword(""); load(); }, "已登记昵称，解析完成后出现在列表。"); }} />
+          <button className="btn-primary shrink-0" disabled={busy || !keyword.trim()}
+            onClick={() => void act(async () => { await api("/api/bloggers", { method: "POST", body: JSON.stringify({ keyword }) }); setKeyword(""); load(); }, "已登记昵称，解析完成后出现在列表。")}>添加</button>
+        </div>
+        {pending.length > 0 && <p className="mt-2 text-sm text-muted">待解析：{pending.map(p => `${p.name}${p.status === "paused" ? "（未找到）" : ""}`).join("、")}</p>}
+      </section>
+
+      {active.startsWith("s") && (
+        <section className="panel"><h3 className="font-semibold text-lg">{pending.find(p => `s${p.id}` === active)?.name}</h3>
+          <p className="mt-2 text-sm text-muted">{pending.find(p => `s${p.id}` === active)?.status === "paused"
+            ? "未找到该昵称的达人；请核对昵称后删除重新添加。" : "昵称解析中：一轮采集完成后自动转为博主，或稍后刷新查看。"}</p>
+        </section>
+      )}
+
+      {detail && current && (
+        <>
+          <section className="panel">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="font-semibold text-lg">{detail.name}</h3>
+                <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
+                  <span>粉丝 <span className="font-medium text-ink">{fmtNum(detail.profile?.fans ?? null)}</span></span>
+                  <span>获赞 <span className="font-medium text-ink">{fmtNum(detail.profile?.likes ?? null)}</span></span>
+                  <span>作品 <span className="font-medium text-ink">{fmtNum(detail.profile?.items ?? null)}</span></span>
+                  {detail.profile?.tag1 && <span className="rounded-full bg-brand/10 px-2 py-0.5 text-xs text-brand">{[detail.profile.tag1, detail.profile.tag2].filter(Boolean).join(" / ")}</span>}
+                </p>
+                {detail.profile?.intro && <p className="mt-2 max-w-2xl whitespace-pre-line text-sm leading-6 text-muted">{detail.profile.intro}</p>}
+                <p className="mt-2 text-xs text-faint">最近采集 {detail.lastCollectAt ? `${fmtTime(detail.lastCollectAt)}（${relTime(detail.lastCollectAt)}）` : "尚未采集"}</p>
+              </div>
+              <ConfirmBtn label="移出" confirmLabel="确认移出" disabled={busy}
+                onConfirm={() => void act(async () => { await api(`/api/bloggers/${detail.id}`, { method: "DELETE" }); setActive(""); load(); }, "已移出。")} />
+            </div>
+            <div className="mt-4 flex flex-wrap gap-x-8 gap-y-3 border-t border-line pt-4">
+              <Toggle checked={detail.status === "ready"} disabled={busy} label="追踪中" hint="暂停后不再消耗额度"
+                onChange={v => void act(async () => { await api(`/api/bloggers/${detail.id}`, { method: "PUT", body: JSON.stringify({ status: v ? "ready" : "paused" }) }); loadDetail(detail.id); }, "已更新。")} />
+              <Toggle checked={!!detail.options?.core} disabled={busy} label="日增曲线" hint="+1 次/天，粉丝与点赞每日净增"
+                onChange={v => void act(async () => { await api(`/api/bloggers/${detail.id}`, { method: "PUT", body: JSON.stringify({ core: v }) }); loadDetail(detail.id); }, "已更新，下轮采集生效。")} />
+              <Toggle checked={!!detail.options?.info} disabled={busy} label="资料页" hint="+1 次/天，简介/粉丝数/里程碑"
+                onChange={v => void act(async () => { await api(`/api/bloggers/${detail.id}`, { method: "PUT", body: JSON.stringify({ info: v }) }); loadDetail(detail.id); }, "已更新，下轮采集生效。")} />
+            </div>
+          </section>
+
+          {detail.trend && (
+            <section className="panel">
+              <h3 className="font-semibold text-lg">粉丝日增 · 近14天</h3>
+              <p className="mt-2 text-sm text-muted">今日净增 <span className="font-medium text-ink">{fmtNum(detail.trend.summary.newFansDay)}</span> · 近7天 <span className="font-medium text-ink">{fmtNum(detail.trend.summary.newFansWeek)}</span></p>
+              <div className="mt-3"><FanBars fans={detail.trend.fans} /></div>
+            </section>
+          )}
+
+          <section className="panel">
+            <h3 className="font-semibold text-lg">作品 · 近30天热门</h3>
+            {!detail.works.length && <p className="mt-4 text-sm text-muted">近30天暂无上榜作品；数据随每轮采集更新。</p>}
+            <div className="mt-4 space-y-2">
+              {detail.works.map(w => <div key={w.id} className="rounded-lg border border-line/70 bg-canvas/50 px-3 py-2.5">
+                <a className="link block truncate text-sm" href={w.url} target="_blank" rel="noreferrer">{w.title || w.id}</a>
+                <p className="mt-1.5 flex flex-wrap items-center justify-between gap-2 text-xs leading-6 text-muted">
+                  <span>{w.publishedAt ? `${fmtTime(w.publishedAt).slice(0, 10)} 发布` : "发布时间未知"}</span>
+                  <span className="tabular-nums">赞 <span className="font-medium text-ink">{fmtNum(w.likes)}</span> · 评 <span className="font-medium text-ink">{fmtNum(w.comments)}</span> · 转 <span className="font-medium text-ink">{fmtNum(w.shares)}</span> · 关注 <span className="font-medium text-ink">{fmtNum(w.follows)}</span></span>
+                </p>
+              </div>)}
+            </div>
+          </section>
+        </>
+      )}
+
+      {!bloggers.length && !pending.length && <section className="panel"><p className="text-sm text-muted">尚未追踪博主；在上方输入昵称添加，数据经抖音指数采集。</p></section>}
+      {message && <Msg tone={failed ? "error" : "ok"}>{message}</Msg>}
+    </div>
+  </Page>;
+}

@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, AccountContext, type Account } from "./api";
 import { Badge, Msg, PillTab } from "./components/Common";
+import BloggersPage from "./pages/Bloggers";
 import CollectionPage from "./pages/Collection";
 import SettingsPage from "./pages/Settings";
 import MonitorPage from "./pages/Monitor";
 import { KeepAlive, PageCacheProvider } from "./components/PageCache";
 import RulesMenu from "./components/RulesMenu";
-const TABS = [["monitor", "数据监控"], ["collection", "指数采集"], ["settings", "设置"]];
+const TABS = [["monitor", "数据监控"], ["collection", "指数采集"], ["bloggers", "博主"], ["settings", "设置"]];
 const ACCOUNT_KEY = "everyone-content-selected-account";
 
 /** 顶栏账号下拉:切换与新建同面板,面板挂 body 避开顶栏横向滚动裁剪(同 RulesMenu) */
@@ -100,6 +101,7 @@ export default function App() {
       {current.status === "archived" && tab !== "settings" && <p className="mb-5 text-sm text-warn">当前账号已归档，可查看历史；恢复账号请进入设置。</p>}
       <KeepAlive active={tab === "monitor"}><MonitorPage /></KeepAlive>
       <KeepAlive active={tab === "collection"}><CollectionPage account={current} /></KeepAlive>
+      <KeepAlive active={tab === "bloggers"}><BloggersPage /></KeepAlive>
       <KeepAlive active={tab === "settings"}><SettingsPage current={current} onUpdate={update} /></KeepAlive>
     </main></PageCacheProvider></AccountContext.Provider>}
     {accounts === null && !error && <p className="text-sm text-muted">正在加载账号…</p>}
