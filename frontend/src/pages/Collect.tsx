@@ -169,11 +169,17 @@ export default function CollectPage({ current, onUpdate }: { current: Account; o
         <h2 className="font-semibold text-xl">采集日志</h2>
         <p className="mt-2 text-sm text-muted">时间均为北京时间。“查看记录”展示本次采集的入库数据。</p>
         <div className="mt-4 space-y-2">{runPage.slice.map(r => <div key={r.id} className="rounded-lg border border-line/70 bg-canvas/50 px-3 py-2 text-sm">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span>{names[r.provider]} · {r.operation} · {r.target}<span className="ml-2 text-xs text-muted">{fmtTime(r.observed_at)}{r.version ? ` · 数据版本 ${r.version}` : ""}</span></span>
-            <span className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 tabular-nums">
+            <span className="flex min-w-0 items-baseline gap-2">
+              <span className="w-24 shrink-0 text-muted">{names[r.provider]}</span>
+              <span className="w-28 shrink-0 text-muted">{r.operation}</span>
+              <span className="min-w-0 flex-1 truncate font-medium text-ink">{r.target}</span>
+            </span>
+            <span className="flex shrink-0 items-center gap-2 text-xs text-muted">
+              <span className="w-36">{fmtTime(r.observed_at)}</span>
+              {r.version && <span className="w-32">数据版本 {r.version}</span>}
               <Badge tone={RUN_TONE[r.status] ?? "gray"}>{statuses[r.status] ?? r.status}</Badge>
-              {r.error && <span className="text-danger">{reason(r.error)}</span>}
+              {r.error && <span className="max-w-48 truncate text-danger">{reason(r.error)}</span>}
               {r.status === "ok" && <a className="link ml-1" href="#" onClick={e => {
                 e.preventDefault();
                 if (runDetail?.id === r.id) { setRunDetail(null); return; }
