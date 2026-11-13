@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { useApi, type Account } from "../api";
 import { Page } from "../components/Layout";
 import StrategyEditor from "../components/StrategyEditor";
+import WritingCorpusEditor from "../components/WritingCorpus";
 import CollectionRules from "../components/CollectionRules";
 import ExcludeKeywords from "../components/ExcludeKeywords";
 import CollectionSchedule from "../components/CollectionSchedule";
@@ -12,7 +13,7 @@ import Pager, { usePaged } from "../components/Pager";
 
 interface Source { id: number; kind: string; source_key: string; name: string; status: string; note: string }
 interface Sources { keywords: Source[] }
-const SECTIONS = [["account", "账号资料"], ["sources", "关键词"], ["rules", "采集设置"], ["strategy", "账号画像"]];
+const SECTIONS = [["account", "账号资料"], ["strategy", "账号画像"], ["sources", "关键词"], ["rules", "采集设置"], ["writing", "写作语料"]];
 const srcStatus = (s: string): { label: string; tone: Tone } =>
   s === "ready" ? { label: "已启用", tone: "success" } : { label: "已暂停", tone: "fade" };
 
@@ -92,6 +93,7 @@ export default function SettingsPage({ current, onUpdate }: { current: Account; 
         </section>
       </KeepAlive>
       <KeepAlive active={section === "strategy"}><StrategyEditor disabled={archived} /></KeepAlive>
+      <KeepAlive active={section === "writing"}><WritingCorpusEditor account={current} /></KeepAlive>
       {msg && <Msg tone={msg.ok ? "ok" : "error"}>{msg.text}</Msg>}
     </div>
   </Page>;

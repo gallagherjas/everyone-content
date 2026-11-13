@@ -32,6 +32,7 @@ import { CollectionStore, PROVIDERS, atomic } from '../collector/core/store.ts';
 import { collectionStatus } from '../collector/core/status.ts';
 import { planCollection } from '../collector/core/planner.ts';
 import { runScheduledCollection } from '../lib/collection-scheduler.ts';
+import { writingCorpus, saveWriting } from '../lib/writing.ts';
 const PORT = Number(process.env.WEB_PORT ?? 8788),
   DIST = join(ROOT, 'frontend', 'dist');
 const TASKS: Record<string, string> = { collect: 'collector/run.ts' };
@@ -350,6 +351,15 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
       if (s.kind === 'keyword' && status === 'ready') matchKeywords(db, a);
     }
     return json(res, { ok: true });
+  }
+  if (path === '/api/writing') {
+    if (method === 'GET') { activeAccount(db, id); return json(res, writingCorpus(id)); }
+    if (method === 'PUT') {
+      activeAccount(db, id);
+      const b = await body(req);
+      try { return json(res, saveWriting(id, { preferences: b.preferences, originals: b.originals })); }
+      catch (error) { throw new InputError((error as Error).message === 'writing_corpus_too_large' ? '写作语料过大，偏好或原稿超出可保存长度。' : '写作语料格式无效。', 400); }
+    }
   }
   if (path === '/api/strategy' && method === 'GET') return json(res, strategy(db, id));
   if (path === '/api/strategy/draft' && method === 'PUT') {
