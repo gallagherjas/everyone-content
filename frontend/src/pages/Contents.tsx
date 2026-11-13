@@ -36,7 +36,7 @@ export default function ContentsPage({ archived }: { archived: boolean }) {
   return (
     <div className="space-y-5">
       <section className="panel">
-        <h2 className="font-display text-xl">已发布作品</h2>
+        <h2 className="font-semibold text-xl">已发布作品</h2>
         <p className="mt-2 text-sm text-muted">登记实际发布链接和时间；该作品被本账号指数采集收录时，展示来源提供的指标。</p>
         <fieldset disabled={archived || busy} className="mt-4 flex flex-wrap gap-2">
           <input
@@ -85,7 +85,7 @@ export default function ContentsPage({ archived }: { archived: boolean }) {
           : null;
         return (
           <section className="panel" key={item.id}>
-            <h3 className="font-display text-lg">作品 #{item.id}</h3>
+            <h3 className="font-semibold text-lg">作品 #{item.id}</h3>
             <a
               className="link mt-2 block break-all text-sm"
               href={item.published_url}

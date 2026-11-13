@@ -29,7 +29,7 @@ export default function IndexAuthorization({ disabled }: { disabled: boolean }) 
     finally { setBusy(false); }
   };
   return <div className="space-y-5">
-    <h3 className="font-display text-lg">连接抖音指数</h3>
+    <h3 className="font-semibold text-lg">连接抖音指数</h3>
     <p className="text-sm leading-6 text-muted">打开专用抖音登录窗口，扫码并按页面提示完成验证。登录会话自动保存在本机，并绑定当前账号。</p>
     <div className="flex flex-wrap items-center gap-3">
       <button className="btn-primary" disabled={disabled || busy || running || !state}

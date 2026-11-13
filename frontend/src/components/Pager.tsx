@@ -9,7 +9,7 @@ export default function Pager({ page, total, pageSize, onChange }: {
   return (
     <div className="flex items-center justify-center gap-4 pt-1 text-sm">
       <button disabled={page <= 1} onClick={() => onChange(page - 1)} className="btn-sm">‹ 上一页</button>
-      <span className="text-muted">第 <span className="font-display text-ink">{page}</span> / {pages} 页<span className="mx-1.5 text-line">·</span>共 {total} 条</span>
+      <span className="text-muted">第 <span className="font-semibold text-ink">{page}</span> / {pages} 页<span className="mx-1.5 text-line">·</span>共 {total} 条</span>
       <button disabled={page >= pages} onClick={() => onChange(page + 1)} className="btn-sm">下一页 ›</button>
     </div>
   );

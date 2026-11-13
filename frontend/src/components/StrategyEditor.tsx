@@ -67,7 +67,7 @@ export default function StrategyEditor({ disabled = false }: { disabled?: boolea
     <div className="space-y-5">
       <section className="panel space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="font-display text-xl">账号画像</h2>
+          <h2 className="font-semibold text-xl">账号画像</h2>
           {state && <span className="text-xs text-muted">版本 {state.sha.slice(0, 8)}</span>}
         </div>
         {state && <p className="text-sm" aria-label="画像完整性">生效画像：{state.initialization?.initialized ? '完整' : '待补充'}</p>}
@@ -126,7 +126,7 @@ export default function StrategyEditor({ disabled = false }: { disabled?: boolea
       </section>
       {state && (
         <section className="panel">
-          <h2 className="font-display text-xl">版本历史</h2>
+          <h2 className="font-semibold text-xl">版本历史</h2>
           <div className="mt-3 divide-y divide-line">
             {state.history.map((item, i) => (
               <div

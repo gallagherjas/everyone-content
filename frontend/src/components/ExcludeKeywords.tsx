@@ -44,8 +44,8 @@ export default function ExcludeKeywords({ disabled }: { disabled: boolean }) {
       <button type="button" className="btn-primary shrink-0" aria-label="添加排除关键词" disabled={blocked || !splitWords(input).length} onClick={() => apply([...excluded, ...splitWords(input)])}>添加</button>
     </div>
     <div className="flex flex-wrap gap-2">
-      {excluded.map(word => <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-line bg-paper pl-3 pr-1 text-sm" key={wordKey(word)}>
-        <span className="break-all">{word}</span><button type="button" className="rounded-full px-2 py-1 text-muted hover:text-clay disabled:opacity-40" aria-label={`从排除关键词移除“${word}”`} disabled={blocked} onClick={() => apply(excluded.filter(value => value !== word))}>×</button>
+      {excluded.map(word => <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-line bg-canvas pl-3 pr-1 text-sm" key={wordKey(word)}>
+        <span className="break-all">{word}</span><button type="button" className="rounded-full px-2 py-1 text-muted hover:text-danger disabled:opacity-40" aria-label={`从排除关键词移除“${word}”`} disabled={blocked} onClick={() => apply(excluded.filter(value => value !== word))}>×</button>
       </span>)}
       {!excluded.length && <p className="text-sm text-muted">尚未添加</p>}
     </div>

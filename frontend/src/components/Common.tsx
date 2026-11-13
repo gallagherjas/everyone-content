@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 export function Empty({ title, hint }: { title: string; hint?: string }) {
   return (
     <div className="rounded-2xl border border-dashed border-line bg-card/60 px-6 py-16 text-center">
-      <div className="font-display text-2xl text-fade">{title}</div>
+      <div className="text-2xl font-semibold text-muted">{title}</div>
       {hint && <div className="mt-2 text-sm text-muted">{hint}</div>}
     </div>
   );
@@ -15,17 +15,15 @@ export function TableBox({ children }: { children: ReactNode }) {
   return <div className="overflow-x-auto rounded-2xl border border-line bg-card">{children}</div>;
 }
 
-/** 状态徽章:success 通过 / amber 进行中 / clay 待处理 / fade 弱化 */
+/** 状态徽章:success 通过 / fade 弱化,无边框浅底胶囊 */
 const TAG_TONES = {
-  success: "border-brand/40 bg-brand/10 text-brand",
-  amber: "border-amber/40 bg-amber/10 text-amber",
-  clay: "border-clay/40 bg-clay/10 text-clay",
-  fade: "border-line bg-paper text-fade",
+  success: "bg-brand/10 text-brand",
+  fade: "bg-ink/[0.06] text-muted",
 };
 export type Tone = keyof typeof TAG_TONES;
 
 export function Tag({ tone = "fade", children }: { tone?: Tone; children: ReactNode }) {
-  return <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs leading-4 ${TAG_TONES[tone]}`}>{children}</span>;
+  return <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs leading-4 ${TAG_TONES[tone]}`}>{children}</span>;
 }
 
 /** 悬浮提示:默认在上方显示带小角的面板,上方空间不足时翻到下方 */
@@ -62,7 +60,7 @@ export function FilterSelect({ label, value, onChange, options }: {
 export function Msg({ tone = "ok", children }: { tone?: "ok" | "error"; children: ReactNode }) {
   return (
     <p role={tone === "error" ? "alert" : "status"}
-      className={`rounded-xl border px-4 py-2.5 text-sm ${tone === "ok" ? "border-brand/30 bg-brand/5 text-brand-deep" : "border-clay/40 bg-clay/5 text-clay"}`}>
+      className={`rounded-xl px-4 py-2.5 text-sm ${tone === "ok" ? "bg-brand/10 text-brand-deep" : "bg-danger/10 text-danger"}`}>
       {children}
     </p>
   );
@@ -76,19 +74,19 @@ export function Toggle({ checked, onChange, disabled, label, hint }: {
     <label className={`inline-flex items-start gap-2.5 ${disabled ? "opacity-50" : "cursor-pointer"}`}>
       <button type="button" role="switch" aria-checked={checked} disabled={disabled}
         onClick={() => onChange(!checked)}
-        className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full border transition-colors ${checked ? "border-brand bg-brand" : "border-fade bg-paper"}`}>
-        <span className={`absolute left-0.5 top-1/2 h-4 w-4 -translate-y-1/2 rounded-full transition-transform ${checked ? "translate-x-4 bg-paper" : "bg-fade"}`} />
+        className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full border transition-colors ${checked ? "border-brand bg-brand" : "border-line bg-canvas"}`}>
+        <span className={`absolute left-0.5 top-1/2 h-4 w-4 -translate-y-1/2 rounded-full transition-transform ${checked ? "translate-x-4 bg-white" : "bg-faint"}`} />
       </button>
       <span className="text-sm leading-6">{label}{hint && <span className="ml-2 text-xs text-muted">{hint}</span>}</span>
     </label>
   );
 }
 
-/** 胶囊页签(顶部导航/策略文档切换共用) */
+/** 胶囊页签(顶部导航分段容器内):选中白底浮起,未选中弱化 */
 export function PillTab({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button onClick={onClick}
-      className={`shrink-0 rounded-full px-4 py-1.5 text-sm transition ${active ? "bg-ink text-paper" : "text-muted hover:text-ink"}`}>
+      className={`shrink-0 rounded-full px-4 py-1.5 text-sm transition ${active ? "bg-card font-medium text-ink shadow-sm" : "text-muted hover:text-ink"}`}>
       {children}
     </button>
   );
@@ -114,7 +112,7 @@ export function ConfirmBtn({ label, confirmLabel = "确认？", onConfirm, size 
     <button type="button" disabled={disabled} onBlur={() => setArmed(false)}
       onClick={() => { if (armed) { setArmed(false); onConfirm(); } else setArmed(true); }}
       className={`${shape} disabled:cursor-not-allowed disabled:opacity-40 ${
-        armed ? "border-clay/60 bg-clay/10 text-clay" : "border-line text-muted hover:border-brand hover:text-brand"
+        armed ? "border-danger/60 bg-danger/10 text-danger" : "border-line text-muted hover:border-brand hover:text-brand"
       }`}>
       {armed ? confirmLabel : label}
     </button>

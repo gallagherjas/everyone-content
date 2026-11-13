@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { api, AccountContext, type Account } from "./api";
-import { Msg, PillTab } from "./components/Common";
+import { Msg, PillTab, Tag } from "./components/Common";
 import CollectionPage from "./pages/Collection";
 import SettingsPage from "./pages/Settings";
 import ContentsPage from "./pages/Contents";
@@ -8,10 +9,61 @@ import { KeepAlive, PageCacheProvider } from "./components/PageCache";
 import RulesMenu from "./components/RulesMenu";
 const TABS = [["collection", "采集"], ["contents", "已发布"], ["settings", "设置"]];
 const ACCOUNT_KEY = "everyone-content-selected-account";
+
+/** 顶栏账号下拉:切换与新建同面板,面板挂 body 避开顶栏横向滚动裁剪(同 RulesMenu) */
+function AccountSelect({ accounts, current, onPick, onCreate }: {
+  accounts: Account[]; current: Account | null; onPick: (id: number) => void; onCreate: (name: string) => Promise<boolean>;
+}) {
+  const [open, setOpen] = useState(false), [draft, setDraft] = useState(""), [busy, setBusy] = useState(false);
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null), panelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => { if (!btnRef.current?.contains(event.target as Node) && !panelRef.current?.contains(event.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+  const toggle = () => {
+    if (open) { setOpen(false); return; }
+    const rect = btnRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setPos({ top: rect.bottom + 6, right: window.innerWidth - rect.right });
+    setOpen(true);
+  };
+  const submit = async () => {
+    if (busy || !draft.trim()) return;
+    setBusy(true);
+    if (await onCreate(draft)) { setDraft(""); setOpen(false); }
+    setBusy(false);
+  };
+  return <div className="shrink-0">
+    <button ref={btnRef} type="button" className="field field-caret flex w-44 items-center text-left" aria-label="当前运营账号" aria-expanded={open} onClick={toggle}>
+      <span className={`truncate ${current ? "" : "text-muted"}`}>{current ? current.name + (current.status === "archived" ? "（已归档）" : "") : "选择账号"}</span>
+    </button>
+    {open && createPortal(
+      <div ref={panelRef} className="fixed z-50 w-64 rounded-xl border border-line bg-card p-2 shadow-lg" style={{ top: pos?.top, right: pos?.right }}>
+        <div className="flex items-center gap-2 border-b border-line pb-2">
+          <input className="field min-w-0 flex-1" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="输入账号名称" aria-label="新账号名称" maxLength={80}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) void submit(); }} />
+          <button type="button" className="btn-sm shrink-0" disabled={!draft.trim() || busy} onClick={() => void submit()}>{busy ? "创建中…" : "＋ 添加"}</button>
+        </div>
+        <div className="max-h-72 overflow-auto pt-1">
+          {accounts.map((a) => (
+            <button type="button" key={a.id} onClick={() => { onPick(a.id); setOpen(false); }}
+              className={`flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1 text-left text-sm transition ${a.id === current?.id ? "bg-brand/10 font-medium text-brand" : "hover:bg-canvas"}`}>
+              <span className="truncate">{a.name}</span>
+              {a.status === "archived" && <Tag tone="fade">已归档</Tag>}
+            </button>
+          ))}
+          {!accounts.length && <p className="px-2 py-1 text-sm text-muted">创建第一个账号开始使用。</p>}
+        </div>
+      </div>, document.body)}
+  </div>;
+}
+
 export default function App() {
   const [tab, setTab] = useState("collection"), [accounts, setAccounts] = useState<Account[] | null>(null);
   const [id, setId] = useState<number | null>(() => Number(localStorage.getItem(ACCOUNT_KEY)) || null);
-  const [creating, setCreating] = useState(false), [name, setName] = useState("");
   const [error, setError] = useState(""), [busy, setBusy] = useState(false);
   useEffect(() => {
     api<Account[]>("/api/accounts").then((rows) => {
@@ -20,43 +72,32 @@ export default function App() {
     }).catch((e) => setError(String(e)));
   }, []);
   const current = accounts?.find((a) => a.id === id);
-  const firstAccount = accounts?.length === 0;
   const selectAccount = (selected: number | null) => {
     setId(selected);
     if (selected === null) localStorage.removeItem(ACCOUNT_KEY);
     else localStorage.setItem(ACCOUNT_KEY, String(selected));
   };
-  const create = async () => {
+  const create = async (name: string): Promise<boolean> => {
+    if (busy) return false;
     setBusy(true); setError("");
-    try { const a = await api<Account>("/api/accounts", { method: "POST", body: JSON.stringify({ name }) }); setAccounts((rows) => [...(rows ?? []), a]); selectAccount(a.id); setName(""); setCreating(false); setTab("settings"); }
-    catch (e) { setError(String(e)); } finally { setBusy(false); }
+    try { const a = await api<Account>("/api/accounts", { method: "POST", body: JSON.stringify({ name }) }); setAccounts((rows) => [...(rows ?? []), a]); selectAccount(a.id); setTab("settings"); return true; }
+    catch (e) { setError(String(e)); return false; } finally { setBusy(false); }
   };
   const update = (a: Account) => setAccounts((rows) => rows?.map((old) => old.id === a.id ? a : old) ?? null);
   return <div className="mx-auto min-h-screen max-w-7xl px-4 pb-16 sm:px-6">
-    <header className="sticky top-0 z-40 mb-6 border-b border-line bg-paper/95 py-4 backdrop-blur sm:py-5">
+    <header className="sticky top-0 z-40 mb-6 border-b border-line/70 py-4 backdrop-blur sm:py-5">
       <div className="flex items-center gap-4 overflow-x-auto">
-        <div className="flex shrink-0 items-center gap-3"><img className="h-12 w-12 shrink-0 object-contain" src="/brand/mascot.png" alt="" aria-hidden="true" /><div><div className="font-display text-lg">everyone-content</div><p className="text-xs text-muted">{new Date().toLocaleDateString("zh-CN", { timeZone: "Asia/Shanghai", year: "numeric", month: "long", day: "numeric" })} · 北京时间</p></div></div>
-        {current && <nav className="flex shrink-0 items-center gap-1" aria-label="工作台导航">{TABS.map(([key, label]) => <PillTab key={key} active={tab === key} onClick={() => setTab(key)}>{label}</PillTab>)}<RulesMenu /></nav>}
-        <div className="ml-auto flex shrink-0 items-center gap-2">
-          {accounts && accounts.length > 0 && <>
-            <label className="sr-only" htmlFor="account-switch">当前运营账号</label>
-            <select id="account-switch" className="field max-w-64" value={current?.id ?? ""} onChange={(e) => selectAccount(Number(e.target.value) || null)}>
-              <option value="" disabled>选择账号</option>
-              {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}{a.status === "archived" ? "（已归档）" : ""}</option>)}
-            </select>
-            <button className="btn shrink-0" onClick={() => setCreating(!creating)}>＋ 新账号</button>
-          </>}
+        <div className="flex shrink-0 items-center gap-3"><img className="h-12 w-12 shrink-0 object-contain" src="/brand/mascot.png" alt="" aria-hidden="true" /><div><div className="text-lg font-semibold">everyone-content</div><p className="text-xs text-muted">{new Date().toLocaleDateString("zh-CN", { timeZone: "Asia/Shanghai", year: "numeric", month: "long", day: "numeric" })} · 北京时间</p></div></div>
+        {current && <nav className="flex shrink-0 items-center gap-0.5 rounded-full bg-ink/[0.06] p-1" aria-label="工作台导航">{TABS.map(([key, label]) => <PillTab key={key} active={tab === key} onClick={() => setTab(key)}>{label}</PillTab>)}</nav>}
+        <div className="ml-auto flex shrink-0 items-center gap-3">
+          <RulesMenu />
+          {accounts && <AccountSelect accounts={accounts} current={current ?? null} onPick={selectAccount} onCreate={create} />}
         </div>
       </div>
-      {(firstAccount || creating) && <form onSubmit={(e) => { e.preventDefault(); create(); }} className="mt-4 flex flex-wrap gap-2 rounded-xl border border-line bg-card p-4">
-        <input className="field min-w-48 flex-1" value={name} onChange={(e) => setName(e.target.value)} placeholder="输入账号名称" aria-label="新账号名称" maxLength={80} autoFocus />
-        <button className="btn-primary" disabled={busy || !name.trim()}>{busy ? "创建中…" : "创建账号"}</button>
-        {!firstAccount && <button type="button" className="btn" disabled={busy} onClick={() => setCreating(false)}>取消</button>}
-      </form>}
     </header>
     {error && <div className="mb-4"><Msg tone="error">{error}</Msg></div>}
     {current && <AccountContext.Provider value={current.id}><PageCacheProvider key={current.id}><main>
-      {current.status === "archived" && tab !== "settings" && <p className="mb-5 text-sm text-clay">当前账号已归档，可查看历史；恢复账号请进入设置。</p>}
+      {current.status === "archived" && tab !== "settings" && <p className="mb-5 text-sm text-warn">当前账号已归档，可查看历史；恢复账号请进入设置。</p>}
       <KeepAlive active={tab === "collection"}><CollectionPage account={current} /></KeepAlive>
       <KeepAlive active={tab === "contents"}><ContentsPage archived={current.status === "archived"} /></KeepAlive>
       <KeepAlive active={tab === "settings"}><SettingsPage current={current} onUpdate={update} /></KeepAlive>

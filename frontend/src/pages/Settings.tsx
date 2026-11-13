@@ -53,7 +53,7 @@ export default function SettingsPage({ current, onUpdate }: { current: Account; 
     <div className="space-y-5">
       {archived && <Msg tone="error">此账号已归档，数据只读。可在账号资料中恢复。</Msg>}
       <KeepAlive active={section === "account"}><section className="panel space-y-5">
-        <h2 className="font-display text-xl">账号资料</h2>
+        <h2 className="font-semibold text-xl">账号资料</h2>
         <label className="block text-sm">账号名称<input className="field" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} /></label>
         <label className="block text-sm">抖音主页<input className="field" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://www.douyin.com/user/…（可选）" /></label>
         <p className="text-xs leading-6 text-muted">账号是独立的内容运营空间。关键词、采集规则、订阅及结果各自隔离；数据来自本账号已授权的抖音指数。</p>
@@ -66,14 +66,14 @@ export default function SettingsPage({ current, onUpdate }: { current: Account; 
       </section></KeepAlive>
       <KeepAlive active={section === "sources"}>
         <section className="panel space-y-5">
-          <h2 className="font-display text-xl">关键词筛选</h2>
+          <h2 className="font-semibold text-xl">关键词筛选</h2>
           {/* 采集词与排除词两块镜像排列：标签+计数 → 说明 → 输入行 → 列表 */}
           <div className="space-y-2">
             <label className="block text-sm font-medium" htmlFor="source-keyword">采集关键词<span className="ml-2 text-xs font-normal text-muted">{src.keywords.length} 个</span></label>
             <p className="text-xs leading-6 text-muted" id="source-keyword-hint">启用抖音指数后用于话题和视频查询，未启用时仅匹配已有的公开作品。</p>
             <div className="flex gap-2"><input id="source-keyword" className="field flex-1" value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="例如：效率工具、职场技能、日常生活" aria-label="新增关键词" maxLength={80} disabled={archived} /><button className="btn-primary shrink-0" disabled={archived || busy || !keyword.trim()} onClick={() => action(async () => { await api("/api/keywords", { method: "POST", body: JSON.stringify({ keyword }) }); setKeyword(""); })}>添加</button></div>
             <div className="space-y-2">{keywordPage.slice.map((s) => (
-              <div key={s.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-paper px-4 py-3">
+              <div key={s.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-canvas px-4 py-3">
                 <span className="text-sm">{s.name}{s.note && <span className="ml-3 text-xs text-muted">{s.note}</span>}</span>
                 <div className="flex items-center gap-2">{sourceRowActions(s)}</div>
               </div>
@@ -86,7 +86,7 @@ export default function SettingsPage({ current, onUpdate }: { current: Account; 
       <KeepAlive active={section === "rules"}>
         {/* 采集设置各部分合用一个容器：一级标题「采集设置」，各部分为二级标题 */}
         <section className="panel space-y-6">
-          <h2 className="font-display text-xl">采集设置</h2>
+          <h2 className="font-semibold text-xl">采集设置</h2>
           <IndexAuthorization disabled={archived} />
           <CollectionSchedule account={current} onSaved={onUpdate} />
           <CollectionRules account={current} onSaved={async value => { onUpdate(value); }} />

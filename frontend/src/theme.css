@@ -1,54 +1,64 @@
 @import "tailwindcss";
 
 @theme {
-  --color-paper: #f6f4ec;
-  --color-card: #fffdf7;
-  --color-line: #e6e1d3;
-  --color-ink: #26241d;
-  --color-muted: #8d8776;
-  --color-brand: #3e5c4b;
+  --color-canvas: #f8fafc; /* 页面底,冷白 */
+  --color-card: #ffffff; /* 卡片面 */
+  --color-line: #e8e8ec; /* 发丝线,常配 /60–/70 透明度 */
+  --color-ink: #17191e;
+  --color-muted: #83868e;
+  --color-faint: #b0b3ba;
+  --color-brand: #3e5c4b; /* 品牌墨绿:主按钮/链接/选中态 */
   --color-brand-deep: #2e4637;
-  --color-clay: #b0663c;
-  --color-amber: #96762e;
-  --color-fade: #a8a294;
-  --font-display: "Songti SC", "STSong", "Noto Serif SC", "Source Han Serif SC", serif;
+  --color-warn: #d97706; /* 提示/进行中/待处理 */
+  --color-danger: #dc2626; /* 错误/删除/确认态 */
+  --color-blue: #2f7cf6; /* 辅助多彩:视频徽章四色用 */
+  --color-violet: #7c5cf0;
+  --color-rose: #e64980;
+  --shadow-card: 0 1px 2px rgb(23 25 30 / 0.04), 0 8px 24px -16px rgb(23 25 30 / 0.10);
   --font-sans: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
 }
 
-html { background: var(--color-paper); }
+/* 页面底:冷白基调,右上浅蓝、左侧浅绿两片柔光,颜色跟随 blue/brand token */
+html {
+  background:
+    radial-gradient(60rem 40rem at 88% -12%, color-mix(in oklab, var(--color-blue) 8%, transparent), transparent 70%),
+    radial-gradient(52rem 36rem at -10% 24%, color-mix(in oklab, var(--color-brand) 9%, transparent), transparent 70%),
+    var(--color-canvas);
+  background-attachment: fixed;
+}
 body { @apply text-ink font-sans antialiased; }
 
 @layer components {
-  .panel { @apply rounded-2xl border border-line bg-card p-5 sm:p-6; }
-  /* 标题两级:面板标题 h2 font-display text-xl;面板内子区块/列表条目 h3 font-display text-lg */
+  .panel { @apply rounded-2xl border border-line/70 bg-card p-5 shadow-card sm:p-6; }
+  /* 标题两级:面板标题 h2 text-xl font-semibold;面板内子区块/列表条目 h3 text-lg font-semibold */
 
-  .field { @apply w-full rounded-xl border border-line bg-paper px-3 py-2 text-sm outline-none focus:border-brand disabled:opacity-50; }
+  .field { @apply w-full rounded-xl border border-line bg-card px-3 py-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/15 disabled:opacity-50; }
   /* 表单纵排:label 包裹的输入框统一与标签文字的间距,不再逐处写 mt */
   label > .field { @apply mt-2.5; }
-  /* 全站可跳转链接:统一绿色细下划线与悬浮色 */
-  .link { @apply underline decoration-brand/60 underline-offset-4 transition hover:text-brand; }
+  /* 全站可跳转链接:统一墨绿细下划线与悬浮色 */
+  .link { @apply underline decoration-brand/40 underline-offset-4 transition hover:text-brand; }
   /* 统一下拉箭头:原生 select 与自绘下拉触发器共用同一外观 */
   select.field, .field-caret {
     @apply appearance-none pr-9;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238d8776' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%2383868e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right 0.7rem center;
   }
-  .btn { @apply rounded-xl border border-line px-4 py-2 text-sm transition hover:border-brand hover:text-brand disabled:opacity-40 disabled:cursor-not-allowed; }
-  .btn-primary { @apply rounded-xl bg-brand px-4 py-2 text-sm text-paper transition hover:bg-brand-deep disabled:opacity-40 disabled:cursor-not-allowed; }
-  /* 采集进行中的按钮:浅色底,品牌绿从左侧推进,双层文字用 clip-path 对齐裁切 */
-  .btn-progress { @apply relative min-w-24 cursor-wait overflow-hidden rounded-xl border border-line bg-paper px-4 py-2 text-sm text-muted; }
+  .btn { @apply rounded-full border border-line px-4 py-2 text-sm transition hover:border-brand hover:text-brand disabled:opacity-40 disabled:cursor-not-allowed; }
+  .btn-primary { @apply rounded-full bg-brand px-4 py-2 text-sm text-white transition hover:bg-brand-deep disabled:opacity-40 disabled:cursor-not-allowed; }
+  /* 采集进行中的按钮:浅色底,品牌墨绿从左侧推进,双层文字用 clip-path 对齐裁切 */
+  .btn-progress { @apply relative min-w-24 cursor-wait overflow-hidden rounded-full border border-line bg-canvas px-4 py-2 text-sm text-muted; }
   /* 行内小按钮(表格/列表行操作、分页) */
   .btn-sm { @apply rounded-full border border-line px-3.5 py-1 text-xs text-muted transition hover:border-brand hover:text-brand disabled:opacity-40 disabled:cursor-not-allowed; }
   /* 日志/策略正文等预格式块 */
-  .codebox { @apply overflow-auto rounded-xl bg-paper p-4 text-xs leading-6 whitespace-pre-wrap break-words; }
+  .codebox { @apply overflow-auto rounded-xl border border-line/60 bg-canvas p-4 text-xs leading-6 whitespace-pre-wrap break-words; }
   /* 数据表格基线:首列左对齐 pl-5,末列 pr-5,数字列由页面自行 text-right */
   .tbl { @apply w-full text-sm; }
   .tbl thead tr { @apply border-b border-line text-[12px] tracking-wide text-muted; }
   .tbl th { @apply px-3 py-3 text-right font-normal; }
   .tbl th:first-child { @apply pl-5 text-left; }
   .tbl th:last-child { @apply pr-5; }
-  .tbl tbody tr { @apply border-b border-line/60 transition last:border-0 hover:bg-paper; }
+  .tbl tbody tr { @apply border-b border-line/60 transition last:border-0 hover:bg-canvas/60; }
   .tbl tbody td { @apply px-3 py-3; }
   .tbl td:first-child { @apply pl-5; }
   .tbl td:last-child { @apply pr-5; }
@@ -58,5 +68,5 @@ body { @apply text-ink font-sans antialiased; }
 
 /* 细滚动条 */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: #d8d2c2; border-radius: 8px; }
+::-webkit-scrollbar-thumb { background: #d4d4da; border-radius: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }

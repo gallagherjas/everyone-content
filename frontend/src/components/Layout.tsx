@@ -22,14 +22,14 @@ export function Page({ head, items, active, onPick, children }: {
   );
 }
 
-/** 侧栏条目:label + 可选计数,选中墨底反白 */
+/** 侧栏条目:label + 可选计数,选中翠绿浅底 */
 export function SideItem({ active, onClick, label, count }: {
   active: boolean; onClick: () => void; label: ReactNode; count?: number;
 }) {
   return (
     <button onClick={onClick}
       className={`flex items-center justify-between gap-2 rounded-xl px-3.5 py-2 text-left text-sm transition ${
-        active ? "bg-ink text-paper" : "text-muted hover:bg-card hover:text-ink"
+        active ? "bg-brand/10 font-medium text-brand" : "text-muted hover:bg-card hover:text-ink"
       }`}>
       <span className="truncate">{label}</span>
       {count !== undefined && <span className={`shrink-0 text-xs ${active ? "opacity-60" : "opacity-50"}`}>{count}</span>}
@@ -39,5 +39,5 @@ export function SideItem({ active, onClick, label, count }: {
 
 /** 侧栏小标题 */
 export function SideHead({ children }: { children: ReactNode }) {
-  return <div className="mb-1 px-3.5 pt-2 text-[11px] tracking-widest text-fade">{children}</div>;
+  return <div className="mb-1 px-3.5 pt-2 text-[11px] tracking-widest text-faint">{children}</div>;
 }

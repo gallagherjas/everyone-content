@@ -30,9 +30,9 @@ function TimeSelect({ name, times, disabled, onChange }: {
         <button type="button" className="btn-sm shrink-0" disabled={!draft || times.includes(draft) || times.length >= 24} onClick={add}>＋ 添加</button>
       </div>
       <div className="max-h-44 overflow-auto pt-1">
-        {[...times].sort().map(time => <div key={time} className="flex items-center justify-between rounded-lg px-2 py-1 text-sm hover:bg-paper">
+        {[...times].sort().map(time => <div key={time} className="flex items-center justify-between rounded-lg px-2 py-1 text-sm hover:bg-canvas">
           <span>{time}</span>
-          <button type="button" aria-label={`移除${name}运行时间${time}`} title={times.length === 1 ? '至少保留一个运行时间；不想定时请关闭左侧开关' : undefined} className="rounded-full px-2 text-muted transition hover:text-clay disabled:opacity-40" disabled={times.length === 1} onClick={() => onChange(times.filter(value => value !== time))}>×</button>
+          <button type="button" aria-label={`移除${name}运行时间${time}`} title={times.length === 1 ? '至少保留一个运行时间；不想定时请关闭左侧开关' : undefined} className="rounded-full px-2 text-muted transition hover:text-danger disabled:opacity-40" disabled={times.length === 1} onClick={() => onChange(times.filter(value => value !== time))}>×</button>
         </div>)}
       </div>
     </div>}
@@ -88,14 +88,14 @@ export default function CollectionSchedule({ account, onSaved }: { account: Acco
     finally { setBusy(false); }
   };
   return <div className="space-y-5 border-t border-line pt-6">
-    <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-display text-lg">采集时间与次数</h3><span className="text-xs text-muted">{saved === null ? '正在加载设置' : dirty ? '有未保存修改' : '已保存'}</span></div>
+    <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold text-lg">采集时间与次数</h3><span className="text-xs text-muted">{saved === null ? '正在加载设置' : dirty ? '有未保存修改' : '已保存'}</span></div>
     <p className="text-sm leading-6 text-muted">安排每天自动采集的时间与次数，关闭定时后仍可随时手动采集。每日采集次数上限跨账号共用，建议不超过30次/天。</p>
     <form onSubmit={save}>
       <fieldset disabled={disabled} className="space-y-4">
         {COLLECTION_PROVIDERS.map(provider => {
           const schedule = draft.schedules[provider], source = sources[provider];
           const budget = budgets?.find(b => b.provider === provider);
-          return <div key={provider} className="space-y-4 rounded-xl border border-line bg-paper/40 p-4">
+          return <div key={provider} className="space-y-4 rounded-xl border border-line bg-canvas/40 p-4">
             <Toggle label={`${source.name}定时采集`} hint={source.hint} checked={schedule.enabled} disabled={disabled} onChange={enabled => change(provider, { enabled })} />
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="space-y-1.5 text-sm">

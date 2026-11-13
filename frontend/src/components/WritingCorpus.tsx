@@ -29,7 +29,7 @@ export default function WritingCorpusEditor({ account }: { account: Account }) {
     finally { setBusy(false); }
   };
   return <section className="panel space-y-5">
-    <h2 className="font-display text-xl">写作语料</h2>
+    <h2 className="font-semibold text-xl">写作语料</h2>
     <p className="text-sm leading-6 text-muted">本账号的写作偏好与本人原稿，写稿时以此为准；偏好只作补充，不能替代3篇本人原稿的门槛。原稿最多20篇、正文合计不超过20000字，满额后最早的整篇淘汰。</p>
     <div className="space-y-2">
       <label className="block text-sm font-medium" htmlFor="writing-preferences">写作偏好<span className="ml-2 text-xs font-normal text-muted">preferences.md</span></label>
