@@ -5,8 +5,8 @@
 ```text
 everyone-content/
 ├── frontend/                 React 工作台，使用 Vite 构建
-│   ├── src/                   应用入口、账号切换、API 请求与全局样式
-│   │   ├── pages/             数据监控、指数采集、设置三个页面
+│   ├── src/                   应用入口、账号管理、API 请求与全局样式
+│   │   ├── pages/             数据、指数、博主、采集、帐号五个页面
 │   │   └── components/        画像编辑、采集设置、页面缓存和共用组件
 │   ├── public/                品牌与静态资源
 │   └── dist/                  构建生成的前端产物
@@ -43,7 +43,7 @@ everyone-content/
 
 原始响应与解析数据压缩保存于 `runtime/collection/objects/`，SQLite 记录文件路径和 SHA256，并保存作品、作者、话题及指标观测。采集时间、来源有效日期和统计窗口分别记录。未知指标保留 `null`，平台 ID 以字符串保存。数据库时间以 UTC 空格格式存储，界面按北京时间显示。
 
-发现结果由各关键词搜索的视频合并生成。达人指数按入选视频作者的近7天指数归类统计。[结果生成](../collector/core/discovery.ts) · [采集配置和筛选](../skills/collection/references/COLLECTION.md)
+发现结果由各关键词搜索的视频合并生成，话题、视频与达人按指数排榜展示：达人取入选视频作者的近30天指数求和为总体，总体÷视频数为平均。博主走达友域（`author_*` 任务）单独采集：昵称搜索定位后每天采集作品榜，日增曲线与资料页按每博主开关追加；作品按抖音 itemId 与关键词域合并为同一作品，官方标记与精确发布时间跨域共享。[结果生成](../collector/core/discovery.ts) · [博主链路](../collector/core/bloggers.ts) · [采集配置](../skills/collection/SKILL.md)
 
 ## 账号隔离与画像版本
 

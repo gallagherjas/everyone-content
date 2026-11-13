@@ -20,7 +20,7 @@
 
 People running multiple content accounts face three scattered things: topic choices come from scrolling feeds, account positioning lives in their head, and evidence never lines up with data. everyone-content pulls them into one local system:
 
-- **Collection with facts**: per-account keywords and filter rules pull topics, keyword videos, and creator boards from the Douyin Index, driving topic choices with real data instead of guesswork and vibes.
+- **Collection with facts**: per-account keywords and exclusion words pull topics, videos, and creator boards from the Douyin Index, and tracked bloggers add their works and daily stats, driving topic choices with real data instead of guesswork and vibes.
 - **Decisions with a profile**: each account maintains a seven-part profile (positioning, persona, audience, conversion, strategy, format, boundaries), checked item by item during topic review to keep every topic aligned with the account's positioning and goals.
 - **Writing in your style**: start by collecting at least 3 of your own scripts (300+ characters in total); drafts are generated from your writing preferences and keep improving as more of your own writing comes in. The gate exists for better drafts — so the style keeps getting closer to yours and stays free of the AI flavor.
 
@@ -48,15 +48,15 @@ Open an agent conversation in the project directory and try either of these requ
 
 ## Core flow
 
-1. **Set up an account.** Create or select an account, publish its completed profile, connect to the Douyin Index, and save keywords and filter rules. For an existing account, resume from the missing steps. 
-2. **Collect.** Run collection from Collection → Discovery, ask the agent to run it for a specific account, or enable a schedule in collection settings.
-3. **Pick topics yourself.** Browse selected videos in the workbench, watch them on the platform, and decide which topics to pursue.
+1. **Set up an account.** Create or select an account, publish its completed profile, connect to the Douyin Index, and save keywords and exclusion words. For an existing account, resume from the missing steps. 
+2. **Collect.** Run a round from Collect → Overview, ask the agent to run it for a specific account, or enable a schedule in Collect → Schedule.
+3. **Pick topics yourself.** Browse the leaderboard in Index → Videos, watch the videos on the platform, and decide which topics to pursue.
 4. **Ask the agent to review a topic.** Once the completed profile is published, submit a **title, target audience, and one-line value**. The agent checks account fit, consistency, and specificity. You can include reference videos.
 5. **Write on demand.** Before drafting or editing, provide 3 of your own video scripts with at least 300 characters of body text in total. 
 
 ## Multi-account
 
-Each account is an independent local workspace for content operations, with a name you choose. Keywords, index authorization, filter rules, profiles, and collection results are maintained per account. New accounts start blank.
+Each account is an independent local workspace for content operations, with a name you choose. Keywords, index authorization, exclusion words, profiles, and collection results are maintained per account. New accounts start blank.
 
 ## Privacy & data boundaries
 
