@@ -39,7 +39,7 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
   const config = { schedules: Object.fromEntries(['index', 'douyin', 'xhs', 'bili'].map(provider => [provider, { enabled: false, times: ['10:00'], request_limit: 10 }])), index: { discovery: null, tasks: [] } };
   const accounts = [];
   const requests = [], runs = [];
-  const emptyPlatform = () => ({ configured: false, paused: false, error: null, latest: null, deltaToday: null, delta7d: null, series: [] });
+  const emptyPlatform = () => ({ configured: false, paused: false, error: null, latest: null, deltaToday: null, delta7d: null, deltaLikes7: null, deltaViews7: null, series: [] });
   const monitorData = { platforms: { douyin: emptyPlatform(), xhs: emptyPlatform(), bili: emptyPlatform() }, total: { fans: 0, deltaToday: null, delta7d: null, platforms: 0 } };
   replace('fetch', async (input, init = {}) => {
     const url = new URL(String(input), window.location.href), account = Number(init.headers?.['x-everyone-content-account'] ?? 0), method = init.method ?? 'GET';

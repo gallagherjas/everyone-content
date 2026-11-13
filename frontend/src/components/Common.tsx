@@ -15,15 +15,20 @@ export function TableBox({ children }: { children: ReactNode }) {
   return <div className="overflow-x-auto rounded-2xl border border-line bg-card">{children}</div>;
 }
 
-/** 状态徽章:success 通过 / fade 弱化,无边框浅底胶囊 */
-const TAG_TONES = {
-  success: "bg-brand/10 text-brand",
-  fade: "bg-ink/[0.06] text-muted",
+/** 全局徽标:无边框浅底胶囊(视频榜/速览/状态共用),tone 取七种色相 */
+const BADGE_TONES = {
+  brand: "bg-brand/10 text-brand",
+  blue: "bg-blue/10 text-blue",
+  rose: "bg-rose/10 text-rose",
+  violet: "bg-violet/10 text-violet",
+  warn: "bg-warn/10 text-warn",
+  danger: "bg-danger/10 text-danger",
+  gray: "bg-ink/[0.06] text-muted",
 };
-export type Tone = keyof typeof TAG_TONES;
+export type BadgeTone = keyof typeof BADGE_TONES;
 
-export function Tag({ tone = "fade", children }: { tone?: Tone; children: ReactNode }) {
-  return <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs leading-4 ${TAG_TONES[tone]}`}>{children}</span>;
+export function Badge({ tone = "gray", children }: { tone?: BadgeTone; children: ReactNode }) {
+  return <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs leading-4 ${BADGE_TONES[tone]}`}>{children}</span>;
 }
 
 /** 悬浮提示:默认在上方显示带小角的面板,上方空间不足时翻到下方 */

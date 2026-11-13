@@ -1,6 +1,6 @@
 import { useCallback,useEffect,useRef,useState } from "react";
 import { useApi,fmtNum,fmtTime,type Account } from "../api";
-import { ConfirmBtn,FilterSelect,HoverTip,Msg,Tag,type Tone } from "../components/Common";
+import { Badge,ConfirmBtn,FilterSelect,HoverTip,Msg,type BadgeTone } from "../components/Common";
 import { Page } from "../components/Layout";
 import CollectionRules from "../components/CollectionRules";
 import ExcludeKeywords from "../components/ExcludeKeywords";
@@ -12,8 +12,8 @@ interface Run {id:number;provider:string;operation:string;target:string;status:s
 interface Video {id:string;title:string;indexBy:{'7':number|null;'30':number|null};keyword:string;likes:number;comments:number|null;authorName:string;fans:number|null;duration:number|null;publishedAt:string|null;badges?:string[]}
 interface Topic {id:string;name:string;index:number;window:{begin:string;end:string}}
 interface Author {key:string;name:string;videos:string[];totalIndex:number}
-// 视频官方标记的四色徽章(无边框浅底),未识别类型落灰
-const BADGE_TONES:Record<string,string>={lowFansHot:'bg-blue/10 text-blue',highFansRise:'bg-brand/10 text-brand',highLikeRate:'bg-rose/10 text-rose',highPlayOver:'bg-violet/10 text-violet'};
+// 视频官方标记的徽章色相,未识别类型落灰
+const BADGE_TONE:Record<string,BadgeTone>={lowFansHot:'blue',highFansRise:'brand',highLikeRate:'rose',highPlayOver:'violet'};
 interface State {runs:Run[];budgets:{provider:string;daily_limit:number;used:number}[];credentials:Record<string,boolean>;discovery:null|{ready:boolean;keywords:string[];topics:Topic[];videos:Video[];authors:Author[];pending:{topicSearch:string[];videos:string[]};counts:{uniqueVideos:number;eligibleVideos:number;retainedVideos:number;rejected:{likes:number;keywords:number}}}}
 interface Source {id:number;kind:string;source_key:string;name:string;status:string;note:string}
 interface Sources {keywords:Source[]}
@@ -32,9 +32,9 @@ export default function CollectionPage({account,onUpdate}:{account:Account;onUpd
   useCachedLoad('collection',refresh);
   const loadSources=useCallback(()=>api<Sources>("/api/sources").then(setSrc).catch(e=>{setFailure(true);setMessage(String(e));}),[api]);
   useCachedLoad('sources',loadSources);
-  const srcStatus=(s:string):{label:string;tone:Tone}=>s==="ready"?{label:"已启用",tone:"success"}:{label:"已暂停",tone:"fade"};
+  const srcStatus=(s:string):{label:string;tone:BadgeTone}=>s==="ready"?{label:"已启用",tone:"brand"}:{label:"已暂停",tone:"gray"};
   const sourceRowActions=(s:Source)=>{const st=srcStatus(s.status);return <>
-    <Tag tone={st.tone}>{st.label}</Tag>
+    <Badge tone={st.tone}>{st.label}</Badge>
     <button className="btn-sm" disabled={archived||busy} onClick={()=>action(async()=>{await api(`/api/sources/${s.id}`,{method:"PUT",body:JSON.stringify({status:s.status==="ready"?"paused":"ready"})});},"状态已更新。")}>{s.status==="ready"?"暂停":"启用"}</button>
     <ConfirmBtn label="移出" confirmLabel="确认移出" disabled={archived||busy} onConfirm={()=>action(async()=>{await api(`/api/sources/${s.id}`,{method:"DELETE"});},"已移出。")}/>
   </>;};
@@ -62,7 +62,7 @@ export default function CollectionPage({account,onUpdate}:{account:Account;onUpd
   return <Page head="指数采集" active={view} onPick={key=>{setView(key);setMessage("");}} items={[
     {key:"discovery",label:"话题指数",count:discovery?.topics.length},
     {key:"videos",label:"视频指数",count:discovery?.videos.length},
-    {key:"authors",label:"达人指数",count:rankedAuthors.length},
+    {key:"authors",label:"达人指数",count:discovery?rankedAuthors.length:undefined},
     {key:"runs",label:"采集记录"},
     {key:"rules",label:"采集设置"},
   ]}>
@@ -82,7 +82,7 @@ export default function CollectionPage({account,onUpdate}:{account:Account;onUpd
         </>}
         {view==="videos"&&<section className="panel"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold text-lg">入选视频</h3><div className="flex flex-wrap items-center gap-2"><FilterSelect label="视频类型筛选" value={videoBadge} onChange={setVideoBadge} options={[["","全部类型"],["lowFansHot","低粉爆款"],["highFansRise","高涨粉"],["highLikeRate","高点赞率"],["highPlayOver","高完播率"]]}/><FilterSelect label="视频时间口径" value={videoSort} onChange={value=>setVideoSort(value as "7"|"30")} options={[["7","近7天"],["30","近30天"]]}/></div></div><p className="mt-2 text-sm text-muted">合并去重 {discovery.counts.uniqueVideos} 条；点赞不足或未知排除 {discovery.counts.rejected.likes} 条，关键词排除 {discovery.counts.rejected.keywords} 条；达标 {discovery.counts.eligibleVideos} 条，保留 {discovery.counts.retainedVideos} 条。两个窗口指数同等，切换排序查看。</p>
           {!videos.length&&<p className="mt-4 text-sm text-muted">{discovery.ready?'暂无满足当前规则的入选视频。':'数据尚未采齐，采集进度请查看“话题指数”。'}</p>}
-          <div className="mt-4 space-y-4">{videoPage.slice.map(v=><div key={v.id} className="border-t border-line pt-3"><div className="flex items-center gap-2"><div className="min-w-0 flex-1"><HoverTip text={v.title||v.id}><a className="link block truncate text-sm" href={`https://www.douyin.com/video/${v.id}`} target="_blank" rel="noreferrer">{v.title||v.id}</a></HoverTip></div>{!!v.badges?.length&&<span className="flex shrink-0 gap-1">{v.badges.map(b=><span key={b} className={`rounded-full px-2 py-0.5 text-xs leading-4 ${BADGE_TONES[b]??'bg-ink/[0.06] text-muted'}`}>{ {lowFansHot:'低粉爆款',highFansRise:'高涨粉',highLikeRate:'高点赞率',highPlayOver:'高完播率'}[b]??b}</span>)}</span>}</div><p className="mt-1.5 flex flex-wrap items-center justify-between gap-2 text-xs leading-6 text-muted"><span><span className="text-ink">{v.authorName||'作者待补全'}</span>{' · 粉丝 '}<span className="text-ink">{fmtNum(v.fans)}</span>{v.publishedAt?` · ${String(v.publishedAt).slice(0,16)} 发布`:' · 发布时间未知'}</span><span>点赞 <span className="text-ink">{fmtNum(v.likes)}</span>{' · 近7天 '}<span className="text-ink">{fmtNum(v.indexBy['7'])}</span>{' · 近30天 '}<span className="text-ink">{fmtNum(v.indexBy['30'])}</span></span></p></div>)}</div>
+          <div className="mt-4 space-y-4">{videoPage.slice.map(v=><div key={v.id} className="border-t border-line pt-3"><div className="flex items-center gap-2"><div className="min-w-0 flex-1"><HoverTip text={v.title||v.id}><a className="link block truncate text-sm" href={`https://www.douyin.com/video/${v.id}`} target="_blank" rel="noreferrer">{v.title||v.id}</a></HoverTip></div>{!!v.badges?.length&&<span className="flex shrink-0 gap-1">{v.badges.map(b=><Badge key={b} tone={BADGE_TONE[b]??"gray"}>{ {lowFansHot:'低粉爆款',highFansRise:'高涨粉',highLikeRate:'高点赞率',highPlayOver:'高完播率'}[b]??b}</Badge>)}</span>}</div><p className="mt-1.5 flex flex-wrap items-center justify-between gap-2 text-xs leading-6 text-muted"><span><span className="text-ink">{v.authorName||'作者待补全'}</span>{' · 粉丝 '}<span className="text-ink">{fmtNum(v.fans)}</span>{v.publishedAt?` · ${String(v.publishedAt).slice(0,16)} 发布`:' · 发布时间未知'}</span><span>点赞 <span className="text-ink">{fmtNum(v.likes)}</span>{' · 近7天 '}<span className="text-ink">{fmtNum(v.indexBy['7'])}</span>{' · 近30天 '}<span className="text-ink">{fmtNum(v.indexBy['30'])}</span></span></p></div>)}</div>
           <Pager {...videoPage}/>
         </section>}
         {view==="authors"&&<section className="panel"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold text-lg">达人指数</h3><FilterSelect label="达人口径筛选" value={authorSort} onChange={value=>setAuthorSort(value as "total"|"average")} options={[["total","按总体指数"],["average","按平均指数"]]}/></div><p className="mt-2 text-sm text-muted">入选视频按作者归类，近30天指数相加为总体指数，平均指数=总体÷视频数；展示前10名。昵称不能作为已核实身份。</p>{!rankedAuthors.length&&<p className="mt-4 text-sm text-muted">{discovery.ready?'暂无满足当前规则的达人指数。':'数据尚未采齐，采集进度请查看“话题指数”。'}</p>}<div className="mt-3 space-y-3">{rankedAuthors.map((a,i)=><div className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3 text-sm" key={a.key}><span className="flex items-baseline gap-2"><a className="link" href={a.key.startsWith('sec_uid:')?`https://www.douyin.com/user/${a.key.slice(8)}`:`https://www.douyin.com/search/${encodeURIComponent(a.name)}`} target="_blank" rel="noreferrer">{i+1}. {a.name}</a>{a.key.startsWith('nickname:')&&<span className="text-xs text-muted">主页身份待核实</span>}</span><span className="text-xs text-muted">{a.videos.length}条视频 · 总体 {fmtNum(a.totalIndex)} · 平均 {fmtNum(a.totalIndex/a.videos.length)}</span></div>)}</div></section>}

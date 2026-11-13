@@ -33,8 +33,9 @@ export interface Account {
   config: AccountConfig; strategy_sha: string | null;
 }
 
+// 计量统一千分位纯数字,不用万/k缩写
 export const fmtNum = (n: number | null | undefined) =>
-  n == null ? '—' : n >= 10000 ? `${(n / 10000).toFixed(1)}万` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+  n == null ? '—' : n.toLocaleString('en-US');
 
 export const relTime = (s: string | null) => {
   const date = parseTime(s);

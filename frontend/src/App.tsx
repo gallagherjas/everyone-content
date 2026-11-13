@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, AccountContext, type Account } from "./api";
-import { Msg, PillTab, Tag } from "./components/Common";
+import { Badge, Msg, PillTab } from "./components/Common";
 import CollectionPage from "./pages/Collection";
 import SettingsPage from "./pages/Settings";
 import MonitorPage from "./pages/Monitor";
@@ -52,7 +52,7 @@ function AccountSelect({ accounts, current, onPick, onCreate }: {
             <button type="button" key={a.id} aria-label={`切换到 ${a.name}`} onClick={() => { onPick(a.id); setOpen(false); }}
               className={`flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1 text-left text-sm transition ${a.id === current?.id ? "bg-brand/10 font-medium text-brand" : "hover:bg-canvas"}`}>
               <span className="truncate">{a.name}</span>
-              {a.status === "archived" && <Tag tone="fade">已归档</Tag>}
+              {a.status === "archived" && <Badge tone="gray">已归档</Badge>}
             </button>
           ))}
           {!accounts.length && <p className="px-2 py-1 text-sm text-muted">创建第一个账号开始使用。</p>}

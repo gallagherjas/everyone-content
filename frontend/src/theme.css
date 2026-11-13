@@ -7,9 +7,10 @@
   --color-ink: #17191e;
   --color-muted: #83868e;
   --color-faint: #b0b3ba;
-  --color-brand: #3e5c4b; /* 品牌墨绿:主按钮/链接/选中态 */
-  --color-brand-deep: #2e4637;
-  --color-warn: #d97706; /* 提示/进行中/待处理 */
+  --color-brand: #2f7cf6; /* 品牌蓝:主按钮/链接/选中态 */
+  --color-brand-deep: #1e5fc4;
+  --color-up: #16a34a; /* 增长/正向变动:与品牌色区分的涨跌语义色 */
+  --color-warn: #e64980; /* 提示/提醒:玫红,与 rose 同族 */
   --color-danger: #dc2626; /* 错误/删除/确认态 */
   --color-blue: #2f7cf6; /* 辅助多彩:视频徽章四色用 */
   --color-violet: #7c5cf0;
@@ -37,7 +38,7 @@ body { @apply text-ink font-sans antialiased; }
   .field { @apply w-full rounded-xl border border-line bg-card px-3 py-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/15 disabled:opacity-50; }
   /* 表单纵排:label 包裹的输入框统一与标签文字的间距,不再逐处写 mt */
   label > .field { @apply mt-2.5; }
-  /* 全站可跳转链接:统一墨绿细下划线与悬浮色 */
+  /* 全站可跳转链接:统一品牌蓝细下划线与悬浮色 */
   .link { @apply underline decoration-brand/40 underline-offset-4 transition hover:text-brand; }
   /* 统一下拉箭头:原生 select 与自绘下拉触发器共用同一外观 */
   select.field, .field-caret {
@@ -46,12 +47,14 @@ body { @apply text-ink font-sans antialiased; }
     background-repeat: no-repeat;
     background-position: right 0.7rem center;
   }
-  .btn { @apply rounded-full border border-line px-4 py-2 text-sm transition hover:border-brand hover:text-brand disabled:opacity-40 disabled:cursor-not-allowed; }
-  .btn-primary { @apply rounded-full bg-brand px-4 py-2 text-sm text-white transition hover:bg-brand-deep disabled:opacity-40 disabled:cursor-not-allowed; }
-  /* 采集进行中的按钮:浅色底,品牌墨绿从左侧推进,双层文字用 clip-path 对齐裁切 */
-  .btn-progress { @apply relative min-w-24 cursor-wait overflow-hidden rounded-full border border-line bg-canvas px-4 py-2 text-sm text-muted; }
+  /* 动作按钮统一 rounded-xl 形状(与 ConfirmBtn 一致);导航胶囊页签不在此列 */
+  .btn { @apply rounded-xl border border-line px-4 py-2 text-sm transition hover:border-brand hover:text-brand disabled:opacity-40 disabled:cursor-not-allowed; }
+  /* 主按钮:蓝字+浅蓝底+蓝边框的着色样式,与中性 .btn 区分 */
+  .btn-primary { @apply rounded-xl border border-brand/40 bg-brand/10 px-4 py-2 text-sm text-brand transition hover:border-brand hover:bg-brand/15 disabled:opacity-40 disabled:cursor-not-allowed; }
+  /* 采集进行中的按钮:浅色底,品牌蓝从左侧推进,双层文字用 clip-path 对齐裁切 */
+  .btn-progress { @apply relative min-w-24 cursor-wait overflow-hidden rounded-xl border border-line bg-canvas px-4 py-2 text-sm text-muted; }
   /* 行内小按钮(表格/列表行操作、分页) */
-  .btn-sm { @apply rounded-full border border-line px-3.5 py-1 text-xs text-muted transition hover:border-brand hover:text-brand disabled:opacity-40 disabled:cursor-not-allowed; }
+  .btn-sm { @apply rounded-xl border border-line px-3.5 py-1 text-xs text-muted transition hover:border-brand hover:text-brand disabled:opacity-40 disabled:cursor-not-allowed; }
   /* 日志/策略正文等预格式块 */
   .codebox { @apply overflow-auto rounded-xl border border-line/60 bg-canvas p-4 text-xs leading-6 whitespace-pre-wrap break-words; }
   /* 数据表格基线:首列左对齐 pl-5,末列 pr-5,数字列由页面自行 text-right */
@@ -66,7 +69,7 @@ body { @apply text-ink font-sans antialiased; }
   .tbl td:last-child { @apply pr-5; }
 }
 
-::selection { background: #3e5c4b22; }
+::selection { background: #2f7cf622; }
 
 /* 细滚动条 */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
