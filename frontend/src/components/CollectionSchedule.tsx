@@ -92,8 +92,7 @@ export default function CollectionSchedule({ account, onSaved }: { account: Acco
     } catch (error) { setFailed(true); setMessage(String(error)); }
     finally { setBusy(false); }
   };
-  return <div className="space-y-5 border-t border-line pt-6">
-    <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold text-lg">采集时间与次数</h3><span className="text-xs text-muted">{saved === null ? '正在加载设置' : dirty ? '有未保存修改' : '已保存'}</span></div>
+  return <div className="space-y-5">
     <p className="text-sm leading-6 text-muted">安排每天自动采集的时间与次数，关闭定时后仍可随时手动采集。每日采集次数上限跨账号共用，建议不超过30次/天。</p>
     <form onSubmit={save}>
       <fieldset disabled={disabled} className="space-y-4">
