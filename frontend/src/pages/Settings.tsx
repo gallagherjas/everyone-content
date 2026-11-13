@@ -31,8 +31,10 @@ export default function SettingsPage({ current, onUpdate }: { current: Account; 
       {archived && <Msg tone="error">此账号已归档，数据只读。可在账号资料中恢复。</Msg>}
       <KeepAlive active={section === "account"}><section className="panel space-y-5">
         <h2 className="font-semibold text-xl">账号资料</h2>
-        <label className="block text-sm">账号名称<input className="field" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} /></label>
-        <label className="block text-sm">抖音主页<input className="field" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://www.douyin.com/user/…（可选）" /></label>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="block text-sm">账号名称<input className="field" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} /></label>
+          <label className="block text-sm">抖音主页<input className="field" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://www.douyin.com/user/…（可选）" /></label>
+        </div>
         <p className="text-xs leading-6 text-muted">账号是独立的内容运营空间。关键词、采集规则、订阅及结果各自隔离；数据来自本账号已授权的抖音指数。</p>
         <div className="flex flex-wrap items-center gap-3">
           <button className="btn-primary" disabled={busy || !name.trim()} onClick={() => save({ name, profile_url: url })}>保存资料</button>

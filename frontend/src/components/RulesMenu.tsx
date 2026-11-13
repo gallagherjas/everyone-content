@@ -25,13 +25,11 @@ export default function RulesMenu() {
         <p className="text-xs leading-6 text-brand">tips：了解规则前请先打开抖音指数了解其基本知识。</p>
         <p className="text-sm font-medium">采集按 关键词 → 话题 → 视频 → 达人 逐级发现：</p>
         <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-xs leading-6 text-muted">
-          <li>每个关键词进行话题搜索：近30天指数低于「话题指数下限（30天）」的话题淘汰，其余按指数从高到低，最多保留「话题保留数」个。</li>
-          <li>为每个关键词分别搜索近7天与近30天两个窗口的视频，点赞数低于「点赞数下限」或未知的视频淘汰。</li>
-          <li>达标视频按两窗口指数之和排序，最多保留「视频保留数」条；两个窗口同等，可切换排序查看。</li>
-          <li>达人指数按入选视频的作者归类：近30天指数相加为总体指数，平均指数=总体÷视频数，可切换排序查看前10名。</li>
+          <li>每个关键词搜索全部命中话题，以及近7天与近30天两个窗口的视频；不做数量与指数门槛限制。</li>
           <li>排除关键词全程生效：话题名称、视频标题或标签、达人昵称命中任一词即排除。</li>
+          <li>页面按指数排名展示榜单：话题 Top20、视频 Top200（可切近7天/近30天口径与类型）、达人 Top10。</li>
         </ol>
-        <p className="mt-2 text-xs leading-6 text-muted">调整筛选参数后点击「保存并重新筛选」，现有数据立即按新规则重新筛选，无需重新采集。</p>
+        <p className="mt-2 text-xs leading-6 text-muted">调整采集词与排除词即时生效，现有数据立即按新规则重新整理，无需重新采集。</p>
       </div>, document.body)}
   </div>;
 }

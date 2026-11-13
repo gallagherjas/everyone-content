@@ -70,7 +70,7 @@ export function validateConfig(value: unknown): AccountConfig {
   try {
     index = indexConfig(cfg.index);
   } catch {
-    throw new InputError('指数配置无效：话题最多5个、点赞至少100，请检查关键词和数量上限。');
+    throw new InputError('指数配置无效，请检查采集词与排除词。');
   }
   return {
     schedules,

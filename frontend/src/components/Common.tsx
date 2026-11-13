@@ -19,6 +19,7 @@ export function TableBox({ children }: { children: ReactNode }) {
 const BADGE_TONES = {
   brand: "bg-brand/10 text-brand",
   blue: "bg-blue/10 text-blue",
+  up: "bg-up/10 text-up",
   rose: "bg-rose/10 text-rose",
   violet: "bg-violet/10 text-violet",
   warn: "bg-warn/10 text-warn",

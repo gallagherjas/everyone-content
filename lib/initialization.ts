@@ -45,7 +45,6 @@ export function initializationOverview(db: DatabaseSync) {
     if (!profile.initialized) missing.push('profile');
     if (!indexAuthConfigured) missing.push('index_auth');
     if (!collectionKeywords(db, Number(row.id), index?.tasks).length) missing.push('keywords');
-    if (index?.discovery == null) missing.push('collection_config');
     return {
       account_id: row.id, name: row.name, status: row.status, strategy_sha: row.strategy_sha,
       ...profile, index_auth_configured: indexAuthConfigured,

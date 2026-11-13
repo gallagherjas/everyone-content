@@ -99,7 +99,7 @@ test('账号隔离、画像生效与指数配置可通过本地API完成', async
     assert.equal(active.initialization.initialized, true);
     const configuredAccount = async () => (await request('/api/initialization')).accounts.find((row: any) => row.account_id === second.id);
     assert.equal((await configuredAccount()).initialized, true);
-    assert.deepEqual((await configuredAccount()).setup.missing, ['index_auth', 'keywords', 'collection_config']);
+    assert.deepEqual((await configuredAccount()).setup.missing, ['index_auth', 'keywords']);
     assert.equal((await request('/api/context', second.id)).strategy_sha, active.sha);
     await request(`/api/context?strategy_sha=${active.sha}`, first.id, 'GET', undefined, 404);
     await request('/api/strategy/draft', second.id, 'PUT', { docs: { 'account-profile.md': profile }, base_sha: initial.sha }, 409);

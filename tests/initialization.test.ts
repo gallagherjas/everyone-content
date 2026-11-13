@@ -43,7 +43,7 @@ test('画像完整性跟随生效版本，保存草稿和恢复版本后仍可�
     rmSync(join(process.env.EVERYONE_CONTENT_DATA_DIR!, 'releases'), { recursive: true, force: true });
     const summary = initializationOverview(db);
     assert.equal(summary.accounts[0].initialized, true);
-    assert.deepEqual(summary.accounts[0].setup, { complete: false, missing: ['index_auth', 'keywords', 'collection_config'] });
+    assert.deepEqual(summary.accounts[0].setup, { complete: false, missing: ['index_auth', 'keywords'] });
     assert.equal(existsSync(join(process.env.EVERYONE_CONTENT_DATA_DIR!, 'releases')), false);
     assert.ok(!JSON.stringify(summary).includes('家庭园艺爱好者'));
     db.prepare('UPDATE accounts SET strategy_sha=? WHERE id=1').run(blank);
@@ -74,7 +74,7 @@ test('初始化接受有效的旧版关键词和已保存的默认规则，暂�
     const setup = () => initializationOverview(db).accounts[0].setup;
     db.prepare('INSERT INTO collection_credentials VALUES(?,?,?,?)').run(id, 'index', 'private-auth.json', `account:${id}`);
     db.prepare("INSERT INTO account_sources(account_id,kind,source_key,name,status) VALUES(?,'keyword','停用词','停用词','paused')").run(id);
-    assert.deepEqual(setup().missing, ['keywords', 'collection_config']);
+    assert.deepEqual(setup().missing, ['keywords']);
     const legacy = validateConfig({ ...config, index: { discovery: {}, tasks: [{ type: 'videos', keyword: '园艺', days: 7 }] } });
     const setConfig = db.prepare('UPDATE accounts SET config=? WHERE id=?');
     setConfig.run(JSON.stringify(legacy), id);

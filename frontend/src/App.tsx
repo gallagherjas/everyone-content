@@ -99,7 +99,7 @@ export default function App() {
     {current && <AccountContext.Provider value={current.id}><PageCacheProvider key={current.id}><main>
       {current.status === "archived" && tab !== "settings" && <p className="mb-5 text-sm text-warn">当前账号已归档，可查看历史；恢复账号请进入设置。</p>}
       <KeepAlive active={tab === "monitor"}><MonitorPage /></KeepAlive>
-      <KeepAlive active={tab === "collection"}><CollectionPage account={current} onUpdate={update} /></KeepAlive>
+      <KeepAlive active={tab === "collection"}><CollectionPage account={current} /></KeepAlive>
       <KeepAlive active={tab === "settings"}><SettingsPage current={current} onUpdate={update} /></KeepAlive>
     </main></PageCacheProvider></AccountContext.Provider>}
     {accounts === null && !error && <p className="text-sm text-muted">正在加载账号…</p>}

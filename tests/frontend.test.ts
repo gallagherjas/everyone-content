@@ -117,7 +117,7 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     await click('采集设置'); assert.equal(visible('input[type="number"]')[0].value, '3');
     assert.equal(count('/api/collection/config'), configLoads);
     await navigate('数据监控'); assert.equal(count('/api/monitor'), monitorLoads); assert.equal(scroll, 420);
-    await navigate('指数采集'); await click('采集设置'); await edit(field('新增关键词'), '新关键词'); await click('添加');
+    await navigate('指数采集'); await click('关键词'); await edit(field('新增关键词'), '新关键词'); await click('添加');
     assert.equal(requests.filter(request => request.method === 'POST' && request.url.pathname === '/api/keywords').length, 1);
     await edit(field('新增排除关键词'), '广告'); await act(async () => { window.document.querySelector('button[aria-label="添加排除关键词"]').click(); }); // 排除词增删即时保存并重新筛选
     assert.deepEqual(accounts[0].config.index.discovery.excludeKeywords, ['广告']);
@@ -128,16 +128,6 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     await act(async () => { [...timers.values()][0](); });
     assert.equal(count('/api/collection'), collectionLoads + 1); // 轮询发现新记录后重新加载
     await navigate('数据监控'); assert.equal(count('/api/monitor'), monitorLoads + 1); // 采集记录变化使监控重新加载
-    await navigate('指数采集'); // 视图仍是采集设置
-    const rules = visible('section').find(s => [...s.querySelectorAll('h2')].some(h => h.textContent.startsWith('筛选参数'))); // 采集设置视图含关键词与筛选参数两块，须按标签定位输入框
-    await edit([...rules.querySelectorAll('label')].find(l => l.textContent.startsWith('话题指数下限')).querySelector('input'), '3');
-    const saveRules = button('保存并重新筛选');
-    assert.equal(saveRules.disabled, false);
-    await act(async () => { saveRules.click(); });
-    assert.deepEqual(accounts[0].config.index.discovery.excludeKeywords, ['广告']); // 保存筛选参数不覆盖关键词页已存的排除词
-    assert.equal(accounts[0].config.index.discovery.minTopicIndex, 3);
-    assert.equal(accounts[0].config.index.discovery.minVideoLikes, 500);
-    assert.equal(button('保存并重新筛选').disabled, true);
     await navigate('数据监控');
     await switchAccount(2); // 账号隔离：新账号的监控页只加载自己的快照
     assert.equal(requests.filter(request => request.url.pathname === '/api/monitor').at(-1).account, 2);

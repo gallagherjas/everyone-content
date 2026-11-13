@@ -164,7 +164,7 @@ test('新账号独立登记授权与采集规则',()=>{
  }finally{db.close();}
 });
 
-test('指数按30天门槛与保留数入选，筛后入库并保留可用指标；历史记录不删除',async()=>{
+test('指数全量入选并按榜单展示，排除词即时生效；历史记录不删除',async()=>{
  const {db,store}=setup();try{
   config(db,1,{index:{discovery:{excludeKeywords:['AIGC','猫咪'],minTopicIndex:10000,maxVideos:10},tasks:[{type:'topic_trend',id:'999'},{type:'topic_audience',id:'999'},{type:'author_fans',id:'abc'}]}});
   auth(db,1,'valid');db.prepare("INSERT INTO account_sources(account_id,kind,source_key,name) VALUES(1,'keyword','企业AI','企业AI')").run();
@@ -185,8 +185,8 @@ test('指数按30天门槛与保留数入选，筛后入库并保留可用指标
   assert.equal(calls.some(c=>c.path.endsWith('get_topic_relation')),false); // 不再采集话题关联视频与达人榜
   assert.deepEqual(calls.find(c=>c.path.endsWith('query_topic')).payload.param,{app_name:'aweme',keyword:'企业AI',start_date:'20261007',end_date:'20261105'});
   assert.equal(calls.some(c=>/portrait|multi_topic|daren/.test(c.path)),false);
-  assert.equal(db.prepare('SELECT COUNT(*) n FROM collection_topics').get().n,4);
-  assert.equal(db.prepare('SELECT COUNT(*) n FROM works').get().n,3); // The old work remains as history.
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM collection_topics').get().n,5);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM works').get().n,4); // The old work remains as history.
   assert.equal(db.prepare('SELECT COUNT(*) n FROM account_works WHERE account_id=1 AND work_id=9999').get().n,1);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM works WHERE url LIKE '%/105'").get().n,1); // 300赞视频随视频搜索直接入选
   assert.equal(db.prepare('SELECT published_at FROM works WHERE url LIKE \'%/101\'').get().published_at,'2026-11-06 02:00:00');
@@ -195,13 +195,13 @@ test('指数按30天门槛与保留数入选，筛后入库并保留可用指标
   assert.equal(obs.dimension,'videos');assert.equal(obs.effective_at,'20261105');assert.equal(JSON.parse(obs.metrics).likes,500);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM collection_author_ids WHERE external_id IN ('700','900')").get().n,0); // 话题榜作者不再入库
   const view=collectionStatus(db,account(db,1),store).discovery;
-  assert.equal(view.videos[0].fans,1200);assert.equal(view.topics.length,4);
+  assert.equal(view.videos[0].likes,499);assert.equal(view.videos[0].fans,null);assert.equal(view.topics.length,5); // 499赞但指数最高，全量入选居首
   assert.equal(JSON.stringify(view).includes('fans_author_list'),false);assert.equal(JSON.stringify(view).includes('data_path'),false);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE name LIKE 'dx_%'").get().n,0);
   const before=db.prepare('SELECT COUNT(*) n FROM collection_runs').get().n;
-  config(db,1,{index:{...account(db,1).config.index,discovery:{...account(db,1).config.index.discovery,minTopicIndex:999999}}});
+  config(db,1,{index:{...account(db,1).config.index,discovery:{...account(db,1).config.index.discovery,excludeKeywords:['企业AI1']}}});
   planCollection(store,{accountIds:[1],now});
-  assert.equal(collectionStatus(db,account(db,1),store).discovery.topics.length,0);
+  assert.equal(collectionStatus(db,account(db,1),store).discovery.topics.length,4); // 排除词即时生效
   assert.equal(db.prepare("SELECT COUNT(*) n FROM collection_tasks t JOIN collection_task_accounts a ON a.task_key=t.key WHERE a.account_id=1 AND t.operation='topic_relation'").get().n,0);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM collection_runs').get().n,before);
  }finally{db.close();}
