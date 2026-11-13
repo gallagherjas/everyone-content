@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi, fmtNum, fmtTime, relTime } from "../api";
 import { Page } from "../components/Layout";
 import { ConfirmBtn, Msg, Toggle } from "../components/Common";
@@ -45,6 +45,14 @@ export default function BloggersPage() {
     const timer = setTimeout(load, 3000);
     return () => clearTimeout(timer);
   }, [rows, load]);
+  // 解析成功但作品还没采到（当轮额度被关键词用尽时会顺延）:自动补采一轮,无需用户手动点。
+  const followed = useRef(new Set<number>());
+  useEffect(() => {
+    for (const b of rows.filter(r => r.kind === "blogger" && r.status === "ready" && !r.lastCollectAt && !followed.current.has(r.id))) {
+      followed.current.add(b.id);
+      api("/api/run/collect", { method: "POST", body: JSON.stringify({}) }).catch(() => {});
+    }
+  }, [rows, api]);
   const act = async (fn: () => Promise<unknown>, text: string) => {
     if (busy) return; setBusy(true); setFailed(false); setMessage("");
     try { await fn(); setMessage(text); } catch (e) { setFailed(true); setMessage(String(e)); } finally { setBusy(false); }
@@ -119,8 +127,13 @@ export default function BloggersPage() {
               {detail.works.map(w => <div key={w.id} className="rounded-lg border border-line/70 bg-canvas/50 px-3 py-2.5">
                 <a className="link block truncate text-sm" href={w.url} target="_blank" rel="noreferrer">{w.title || w.id}</a>
                 <p className="mt-1.5 flex flex-wrap items-center justify-between gap-2 text-xs leading-6 text-muted">
-                  <span>{w.publishedAt ? `${fmtTime(w.publishedAt).slice(0, 10)} 发布` : "发布时间未知"}</span>
-                  <span className="tabular-nums">赞 <span className="font-medium text-ink">{fmtNum(w.likes)}</span> · 评 <span className="font-medium text-ink">{fmtNum(w.comments)}</span> · 转 <span className="font-medium text-ink">{fmtNum(w.shares)}</span> · 关注 <span className="font-medium text-ink">{fmtNum(w.follows)}</span></span>
+                  <span className="shrink-0">{w.publishedAt ? `${w.publishedAt.endsWith("+08:00") ? fmtTime(w.publishedAt).slice(0, 10) : fmtTime(w.publishedAt)} 发布` : "发布时间未知"}</span>
+                  <span className="flex shrink-0 items-baseline gap-3 tabular-nums">
+                    <span className="w-20">赞 <span className="font-medium text-ink">{fmtNum(w.likes)}</span></span>
+                    <span className="w-16">评 <span className="font-medium text-ink">{fmtNum(w.comments)}</span></span>
+                    <span className="w-16">转 <span className="font-medium text-ink">{fmtNum(w.shares)}</span></span>
+                    <span className="w-20">关注 <span className="font-medium text-ink">{fmtNum(w.follows)}</span></span>
+                  </span>
                 </p>
               </div>)}
             </div>

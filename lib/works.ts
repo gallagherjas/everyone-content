@@ -22,11 +22,13 @@ export function upsertAuthor(db: DatabaseSync, w: DouyinWork) {
   ).run(w.authorId, w.authorName || null);
 }
 
-export function upsertWork(db: DatabaseSync, w: DouyinWork, reason: string): number {
+/** mode=fill 时已有作品的发布时间不覆盖：博主榜单只有日期精度，避免冲掉关键词采集的精确时间点。 */
+export function upsertWork(db: DatabaseSync, w: DouyinWork, reason: string, mode: 'overwrite' | 'fill' = 'overwrite'): number {
   const date = Date.parse(w.publishedAt), pub = Number.isFinite(date) ? sqlTime(new Date(date)) : null;
+  const keep = mode === 'fill' ? 'COALESCE(works.published_at,excluded.published_at)' : 'excluded.published_at';
   const row = db.prepare(`INSERT INTO works(platform,author_id,url,title,published_at,reason) VALUES('douyin',?,?,?,?,?)
     ON CONFLICT(url) DO UPDATE SET author_id=COALESCE(excluded.author_id,works.author_id),
-    title=CASE WHEN excluded.title<>'' THEN excluded.title ELSE works.title END,published_at=COALESCE(excluded.published_at,works.published_at)
+    title=CASE WHEN excluded.title<>'' THEN excluded.title ELSE works.title END,published_at=${keep}
     RETURNING id`).get(w.authorId || null, workUrl(w.id), w.title, pub, reason) as { id: number };
   return Number(row.id);
 }

@@ -47,7 +47,7 @@ export function projectBloggers(store: CollectionStore, a: any, scope: string): 
           metrics: { views: null, likes: w.likes, comments: w.comments, shares: w.shares, collects: null } };
         upsertAuthor(db, work);
         identity(store, works.run, 'daren', s.source_key, { sec_uid: profile.secUid, nickname: s.name });
-        const wid = upsertWork(db, work, 'index:blogger');
+        const wid = upsertWork(db, work, 'index:blogger', 'fill');
         linkWork(db, a.id, wid, 'index:blogger');
         store.observation(works.run, 'work', wid, 'author_works', { likes: w.likes, comments: w.comments, shares: w.shares, follows: w.follows });
       }
@@ -103,9 +103,16 @@ export function bloggerDetail(store: CollectionStore, accountId: number, row: an
     tag1: info.data.first_tag_name ?? null, tag2: info.data.second_tag_name ?? null, intro: String(info.data.user_introduction ?? ''), lastInfoAt: info.run.observed_at });
   const works = latestRun(store, scope, 'author_works', row.source_key);
   const core = latestRun(store, scope, 'author_core', row.source_key);
+  // 榜单发布时间只有日期精度；同一作品若被关键词采集过，作品表里存有精确时间点，合并展示。
+  const precise = profile.secUid
+    ? new Map((db.prepare(`SELECT url,published_at FROM works WHERE platform='douyin' AND author_id=? AND published_at IS NOT NULL`).all(profile.secUid) as any[])
+      .filter(r => !String(r.published_at).endsWith('16:00:00'))
+      .map(r => [r.url.split('/').pop()!, `${String(r.published_at).replace(' ', 'T')}Z`]))
+    : new Map();
   return { id: row.id, userId: row.source_key, name: row.name, status: row.status, profile,
     options: (() => { try { return JSON.parse(row.options || '{}'); } catch { return {}; } })(),
-    works: works ? worksFromCapture(works.data).sort((a, b) => (b.likes ?? 0) - (a.likes ?? 0)) : [],
+    works: works ? worksFromCapture(works.data).sort((a, b) => (b.likes ?? 0) - (a.likes ?? 0))
+      .map(w => ({ ...w, publishedAt: precise.get(w.id) ?? w.publishedAt })) : [],
     trend: core ? { fans: (core.data.fanslistday ?? []).map((r: any) => ({ date: r.date, count: count(r.count) })),
       likes: (core.data.likelistday ?? []).map((r: any) => ({ date: r.date, count: count(r.count) })),
       summary: { newFansDay: count(core.data.fans_info?.new_fans_count_by_day), newFansWeek: count(core.data.fans_info?.new_fans_count_by_week) } } : null,
