@@ -7,7 +7,7 @@ export function indexConfig(value: any={discovery:null,tasks:[]}) {
     if(!Object.hasOwn(PATHS,t.type)||t.type.endsWith('_dates'))throw new Error('指数任务类型无效');
     if(!['videos','topic_search'].includes(t.type))return [];
     requestFor(t,{topic:{valid_day:'20261105'}});
-    return [{type:t.type,keyword:t.keyword}];
+    return [{type:t.type,keyword:t.keyword,...(t.type==='videos'?{days:t.days}:{})}];
   });
   return {discovery:value.discovery===null?null:collectionPolicy(value.discovery),tasks};
 }

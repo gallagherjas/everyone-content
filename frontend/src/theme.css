@@ -25,6 +25,8 @@ body { @apply text-ink font-sans antialiased; }
   .field { @apply w-full rounded-xl border border-line bg-paper px-3 py-2 text-sm outline-none focus:border-brand disabled:opacity-50; }
   /* 表单纵排:label 包裹的输入框统一与标签文字的间距,不再逐处写 mt */
   label > .field { @apply mt-2.5; }
+  /* 全站可跳转链接:统一绿色细下划线与悬浮色 */
+  .link { @apply underline decoration-brand/60 underline-offset-4 transition hover:text-brand; }
   /* 统一下拉箭头:原生 select 与自绘下拉触发器共用同一外观 */
   select.field, .field-caret {
     @apply appearance-none pr-9;

@@ -3,7 +3,7 @@ import { useApi, type Account, type AccountConfig } from '../api';
 import { COLLECTION_PROVIDERS, type CollectionProvider } from '../../../lib/collection-schedule';
 import { Msg, Toggle } from './Common';
 import { useCachedLoad } from './PageCache';
-import type { Budget } from './SourceBudgets';
+export interface Budget { provider: string; daily_limit: number; used: number }
 
 /** 运行时间下拉：收起时固定大小，展开后首行添加、每行 × 删除 */
 function TimeSelect({ name, times, disabled, onChange }: {

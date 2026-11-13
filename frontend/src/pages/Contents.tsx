@@ -87,7 +87,7 @@ export default function ContentsPage({ archived }: { archived: boolean }) {
           <section className="panel" key={item.id}>
             <h3 className="font-display text-lg">作品 #{item.id}</h3>
             <a
-              className="mt-2 block break-all text-sm text-brand underline"
+              className="link mt-2 block break-all text-sm"
               href={item.published_url}
               target="_blank"
               rel="noreferrer"

@@ -75,7 +75,7 @@ test('初始化接受有效的旧版关键词和已保存的默认规则，暂�
     db.prepare('INSERT INTO collection_credentials VALUES(?,?,?)').run(id, 'private-auth.json', `account:${id}`);
     db.prepare("INSERT INTO account_sources(account_id,kind,source_key,name,status) VALUES(?,'keyword','停用词','停用词','paused')").run(id);
     assert.deepEqual(setup().missing, ['keywords', 'collection_config']);
-    const legacy = validateConfig({ ...config, index: { discovery: {}, tasks: [{ type: 'videos', keyword: '园艺' }] } });
+    const legacy = validateConfig({ ...config, index: { discovery: {}, tasks: [{ type: 'videos', keyword: '园艺', days: 7 }] } });
     const setConfig = db.prepare('UPDATE accounts SET config=? WHERE id=?');
     setConfig.run(JSON.stringify(legacy), id);
     assert.deepEqual(setup(), { complete: true, missing: [] });

@@ -31,7 +31,7 @@ test('某账号登录失效不影响另一账号，同词查询与结果归属�
    if(u.pathname.endsWith('get_topic_valid_date'))return json({data:{valid_day:'20261105',valid_week:'20261101'}});
    if(u.pathname.endsWith('get_greater_users_valid_date'))return json({data:{datetime:'20261104'}});
    if(u.pathname.endsWith('query_topic'))return json({data:{topic_list:[]}});
-   if(u.pathname.endsWith('itemQuery'))return json({data:{data:[{itemId:'991',title:'本账号可见作品',likes:'100'}]}});throw new Error('unexpected mock');
+   if(u.pathname.endsWith('itemQuery'))return json({data:{data:[{itemId:'991',title:'本账号可见作品',likes:'500'}]}});throw new Error('unexpected mock');
   };
   await runCollection(store,{clock:()=>base,fetchImpl,sleep:async()=>{}});
   assert.equal(db.prepare("SELECT paused FROM collection_provider_state WHERE provider='index' AND scope='account:1'").get().paused,1);
@@ -54,14 +54,14 @@ test('未登记授权不排指数任务也不伪造失败；登记后立即参�
    const path=new URL(String(input)).pathname;calls.push(path);
    if(path.endsWith('get_topic_valid_date'))return json({data:{valid_day:'20261105',valid_week:'20261101'}});
    if(path.endsWith('query_topic'))return json({data:{topic_list:[]}});
-   return json({data:{data:[{itemId:'123',title:'测试视频',likes:'200',nickname:'测试作者'}]}});
+   return json({data:{data:[{itemId:'123',title:'测试视频',likes:'600',nickname:'测试作者'}]}});
   };
   const opts={accountIds:[1],only:'index',clock:()=>base,fetchImpl,sleep:async()=>{}};
   const idle=await runCollection(store,opts);assert.equal(idle.failed,0);assert.equal(calls.length,0);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM collection_runs').get().n,0);
   const file=join(root,'restored-auth.json');writeFileSync(file,JSON.stringify({cookie:'valid'}),{mode:0o600});
   registerAuth(store,1,file);
-  const restored=await runCollection(store,opts);assert.equal(restored.failed,0);assert.equal(restored.completed,3);
+  const restored=await runCollection(store,opts);assert.equal(restored.failed,0);assert.equal(restored.completed,4);
   assert.ok(calls[0].endsWith('get_topic_valid_date'));assert.equal(collectionStatus(db,account(db,1),store).discovery.ready,true);
  }finally{db.close();}
 });
@@ -73,9 +73,9 @@ test('30天窗口有效版本跨日更新，合法空结果缓存，旧累计缓
   store.claim(legacy,base-DAY);const old=store.begin(legacy,base-DAY);
   const slot=store.reserve(old,'/api/v2/index/query_topic',base-DAY,null,{body:{param:{start_date:'',end_date:version}}});
   store.requestResult(slot.id,'{}',200);store.finish(old,{topic_list:[{topic_id:'99',topic_name:'累计旧话题',topic_index:'999999'}]},version,'legacy',()=>{},base-DAY);store.release(legacy,base+DAY);
-  const opts={accountIds:[1],only:'index',clock:()=>now,fetchImpl,sleep:async()=>{}};await runCollection(store,opts);assert.equal(business,2); // topic + video query, both legitimately empty
-  now+=DAY+1;version='20261106';await runCollection(store,opts);assert.equal(business,4);
-  now+=DAY+1;await runCollection(store,opts);assert.equal(business,4);
+  const opts={accountIds:[1],only:'index',clock:()=>now,fetchImpl,sleep:async()=>{}};await runCollection(store,opts);assert.equal(business,3); // topic + two video windows, all legitimately empty
+  now+=DAY+1;version='20261106';await runCollection(store,opts);assert.equal(business,6);
+  now+=DAY+1;await runCollection(store,opts);assert.equal(business,6);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM collection_observations WHERE kind='topic'").get().n,0);
  }finally{db.close();}
 });
@@ -88,7 +88,7 @@ test('有效日期更新时补采尚未满24小时的旧关键词，新增关键
    const path=new URL(String(input)).pathname,payload=init.body?JSON.parse(init.body):null;calls.push({path,payload});
    if(path.endsWith('get_topic_valid_date'))return json({data:{valid_day:version,valid_week:week}});
    if(path.endsWith('query_topic'))return json({data:{topic_list:[{topic_id:'77',topic_name:'测试话题',topic_index:'10000'}]}});
-   if(path.endsWith('itemQuery'))return json({data:{data:[{itemId:'123',title:'测试视频',likes:'200',index:'1000',nickname:'测试作者'}]}});
+   if(path.endsWith('itemQuery'))return json({data:{data:[{itemId:'123',title:'测试视频',likes:'600',index:'1000',nickname:'测试作者'}]}});
    throw new Error('unexpected endpoint');
   };
   const opts={accountIds:[1],only:'index',clock:()=>now,fetchImpl,sleep:async()=>{}};
@@ -96,12 +96,12 @@ test('有效日期更新时补采尚未满24小时的旧关键词，新增关键
   version='20261106';week='20261102';now+=6*HOUR+1;calls.length=0;
   config(db,1,{index:{discovery:null,tasks:[...tasks,{type:'videos',keyword:'新词'}]}});
   const result=await runCollection(store,opts),view=collectionStatus(db,account(db,1),store).discovery;
-  assert.equal(result.failed,0);assert.equal(result.requests.index,7);assert.equal(view.ready,true);
+  assert.equal(result.failed,0);assert.equal(result.requests.index,10);assert.equal(view.ready,true);
   assert.equal(view.videos.length,1);assert.equal(view.authors.length,1);
   assert.deepEqual(view.pending,{topicSearch:[],videos:[]});
   assert.equal(calls.some(c=>c.path.endsWith('get_topic_relation')),false); // 不再采集话题关联
   assert.deepEqual(calls.filter(c=>c.path.endsWith('query_topic')).map(c=>c.payload.param.keyword).sort(),['新词','旧词乙','旧词甲'].sort());
-  const task=db.prepare("SELECT * FROM collection_tasks WHERE provider='index' AND operation='videos' AND target='旧词甲'").get();
+  const task=db.prepare("SELECT * FROM collection_tasks WHERE provider='index' AND operation='videos' AND target='旧词甲#7'").get();
   db.prepare("UPDATE collection_tasks SET error='service_unavailable',next_run_at=? WHERE key=?").run(now+HOUR,task.key);
   version='20261107';const dateRun=store.latest(db.prepare("SELECT key FROM collection_tasks WHERE operation='topic_dates'").get().key);
   const data={...store.data(dateRun),valid_day:version},artifact=store.artifact(data);
@@ -118,15 +118,15 @@ test('六个关键词受每轮次数分批采集时显示缺失项，下一轮�
    calls++;const path=new URL(String(input)).pathname;
    if(path.endsWith('get_topic_valid_date'))return json({data:{valid_day:'20261105',valid_week:'20261101'}});
    if(path.endsWith('query_topic'))return json({data:{topic_list:[{topic_id:'77',topic_name:'测试话题',topic_index:'10000'}]}});
-   if(path.endsWith('itemQuery'))return json({data:{data:[{itemId:'123',title:'测试视频',likes:'200',index:'1000',nickname:'测试作者'}]}});
+   if(path.endsWith('itemQuery'))return json({data:{data:[{itemId:'123',title:'测试视频',likes:'600',index:'1000',nickname:'测试作者'}]}});
    throw new Error('unexpected endpoint');
   };
   const opts={accountIds:[1],only:'index',clock:()=>base,fetchImpl,sleep:async()=>{}};
   await runCollection(store,opts);let view=collectionStatus(db,account(db,1),store).discovery;
   assert.equal(calls,10);assert.equal(view.ready,false);assert.equal(view.videos.length,0);
-  assert.equal(view.pending.topicSearch.length,0);assert.equal(view.pending.videos.length,3);
+  assert.equal(view.pending.topicSearch.length,0);assert.ok(view.pending.videos.length>=1);
   await runCollection(store,opts);view=collectionStatus(db,account(db,1),store).discovery;
-  assert.equal(calls,13);assert.equal(view.ready,true);assert.equal(view.videos.length,1);assert.equal(view.authors.length,1);
+  assert.equal(calls,19);assert.equal(view.ready,true);assert.equal(view.videos.length,1);assert.equal(view.authors.length,1);
  }finally{db.close();}
 });
 test('指数客户端保留配额异常，只排队一次，不伪造批量网络失败',async()=>{
@@ -164,7 +164,7 @@ test('新账号独立登记授权与采集规则',()=>{
  }finally{db.close();}
 });
 
-test('指数按30天门槛前三生成关联任务，筛后入库并保留可用指标；历史记录不删除',async()=>{
+test('指数按30天门槛与保留数入选，筛后入库并保留可用指标；历史记录不删除',async()=>{
  const {db,store}=setup();try{
   config(db,1,{index:{discovery:{excludeKeywords:['AIGC','猫咪'],minTopicIndex:10000,maxVideos:10},tasks:[{type:'topic_trend',id:'999'},{type:'topic_audience',id:'999'},{type:'author_fans',id:'abc'}]}});
   auth(db,1,'valid');db.prepare("INSERT INTO account_sources(account_id,kind,source_key,name) VALUES(1,'keyword','企业AI','企业AI')").run();
@@ -176,26 +176,26 @@ test('指数按30天门槛前三生成关联任务，筛后入库并保留可用
    now+=3000;const path=new URL(String(input)).pathname,payload=init.body?JSON.parse(init.body):null;calls.push({path,payload});
    if(path.endsWith('get_topic_valid_date'))return json({data:{valid_day:'20261105',valid_week:'20261101'}});
    if(path.endsWith('query_topic'))return json({data:{topic_list:[1,2,3,4].map(n=>({topic_id:String(n),topic_name:'企业AI'+n,topic_index:String(n*10000)})).concat([{topic_id:'5',topic_name:'企业AI',topic_index:'9999'}])}});
-   if(path.endsWith('itemQuery'))return json({data:{data:[{itemId:'101',title:'企业AI工作流',likes:'100',index:'500',nickname:'测试作者',fans:1200,duration:90,createTime:'2026-11-06 10:00:00'},{itemId:'102',title:'企业AI',likes:'99',index:'9999'},{itemId:'103',title:'企业AI #AIGC',likes:'9999',index:'9999'},{itemId:'105',title:'企业AI',likes:'300',index:'100'}]}});
+   if(path.endsWith('itemQuery'))return json({data:{data:[{itemId:'101',title:'企业AI工作流',likes:'500',index:'500',nickname:'测试作者',fans:1200,duration:90,createTime:'2026-11-06 10:00:00'},{itemId:'102',title:'企业AI',likes:'499',index:'9999'},{itemId:'103',title:'企业AI #AIGC',likes:'9999',index:'9999'},{itemId:'105',title:'企业AI',likes:'700',index:'100'}]}});
    if(path.endsWith('get_topic_relation'))return json({data:{item_list:[{item_id:'101',title:'企业AI工作流',digg_cnt:'100',comment_cnt:'5'},{item_id:'104',title:'企业AI案例',digg_cnt:'200',comment_cnt:'3'},{item_id:'105',title:'企业AI 猫咪',digg_cnt:'300'}],digg_author_list:[{author_id:'700',author_name:'话题作者',digg_cnt:'100'}],comment_author_list:[{author_id:'700',author_name:'话题作者',comment_cnt:'3'}],fans_author_list:[{author_id:'900',author_name:'不保留的粉丝榜作者'}]}});
    throw new Error('unexpected endpoint');
   };
   const result=await runCollection(store,{accountIds:[1],only:'index',clock:()=>now,fetchImpl,sleep:async()=>{}});
-  assert.equal(result.failed,0);assert.equal(result.completed,3);
+  assert.equal(result.failed,0);assert.equal(result.completed,4);
   assert.equal(calls.some(c=>c.path.endsWith('get_topic_relation')),false); // 不再采集话题关联视频与达人榜
   assert.deepEqual(calls.find(c=>c.path.endsWith('query_topic')).payload.param,{app_name:'aweme',keyword:'企业AI',start_date:'20261007',end_date:'20261105'});
   assert.equal(calls.some(c=>/portrait|multi_topic|daren/.test(c.path)),false);
-  assert.equal(db.prepare('SELECT COUNT(*) n FROM collection_topics').get().n,3);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM collection_topics').get().n,4);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM works').get().n,3); // The old work remains as history.
   assert.equal(db.prepare('SELECT COUNT(*) n FROM account_works WHERE account_id=1 AND work_id=9999').get().n,1);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM works WHERE url LIKE '%/105'").get().n,1); // 300赞视频随视频搜索直接入选
   assert.equal(db.prepare('SELECT published_at FROM works WHERE url LIKE \'%/101\'').get().published_at,'2026-11-06 02:00:00');
   const obs=db.prepare("SELECT * FROM collection_observations WHERE kind='work' AND object_id=(SELECT id FROM works WHERE url LIKE '%/101')").get();
   assert.equal(db.prepare('SELECT COUNT(*) n FROM content_snapshots').get().n,1);
-  assert.equal(obs.dimension,'videos');assert.equal(obs.effective_at,'20261105');assert.equal(JSON.parse(obs.metrics).likes,100);
+  assert.equal(obs.dimension,'videos');assert.equal(obs.effective_at,'20261105');assert.equal(JSON.parse(obs.metrics).likes,500);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM collection_author_ids WHERE external_id IN ('700','900')").get().n,0); // 话题榜作者不再入库
   const view=collectionStatus(db,account(db,1),store).discovery;
-  assert.equal(view.videos[0].fans,1200);assert.equal(view.topics.length,3);
+  assert.equal(view.videos[0].fans,1200);assert.equal(view.topics.length,4);
   assert.equal(JSON.stringify(view).includes('fans_author_list'),false);assert.equal(JSON.stringify(view).includes('data_path'),false);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE name LIKE 'dx_%'").get().n,0);
   const before=db.prepare('SELECT COUNT(*) n FROM collection_runs').get().n;

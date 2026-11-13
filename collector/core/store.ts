@@ -8,7 +8,9 @@ export const PROVIDERS = ['index'];
 export const hash = (value: any): string => createHash('sha256').update(typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(value)).digest('hex');
 export const stamp = (ms: number): string => new Date(ms).toISOString().slice(0,19).replace('T',' ');
 export const taskKey = (provider: string,scope: string,spec: any): string => hash({provider,scope,type:spec.type,id:spec.id??null,keyword:spec.keyword??null,
-  ...(provider==='index'&&spec.type==='topic_search'?{windowDays:spec.windowDays??null}:{}),contract:provider==='index'?2:1});
+  ...(provider==='index'&&spec.type==='topic_search'?{windowDays:spec.windowDays??null}:{})
+  ,...(provider==='index'&&spec.type==='videos'?{days:spec.days??null}:{}),contract:provider==='index'?2:1});
+export const taskTarget = (spec: any): string => spec.type==='videos' ? `${spec.keyword}#${spec.days}` : String(spec.id??spec.keyword??spec.type);
 export function atomic<T>(db: DatabaseSync, fn: () => T): T {
   db.exec('SAVEPOINT collection_write');
   try { const result=fn(); db.exec('RELEASE collection_write'); return result; }
@@ -33,7 +35,7 @@ export class CollectionStore {
   data(run: any): any { return JSON.parse(this.read(run.data_path,run.data_sha)); }
   queue(provider: string,scope: string,spec: any,accounts: {id: number; configSha: string}[],{interval=86400000,priority=1}:{interval?: number;priority?: number}={}) {
     if(!PROVIDERS.includes(provider))throw new Error('未知采集来源');
-    const key=taskKey(provider,scope,spec),target=String(spec.id??spec.keyword??spec.type);
+    const key=taskKey(provider,scope,spec),target=taskTarget(spec);
     this.db.prepare(`INSERT INTO collection_tasks(key,provider,scope,operation,target,spec,priority,interval_ms)
       VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET spec=excluded.spec,priority=excluded.priority,
       next_run_at=CASE WHEN collection_tasks.interval_ms<>excluded.interval_ms AND collection_tasks.last_success_at IS NOT NULL AND collection_tasks.failures=0

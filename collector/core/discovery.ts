@@ -14,12 +14,12 @@ export function collectionPolicy(value: any = {}): CollectionPolicy {
     if (value[key] !== undefined && (!Array.isArray(value[key]) || value[key].some((v: any) => typeof v !== 'string'))) throw new Error('invalid_collection_terms');
   const policy = {
     excludeKeywords: unique([...(value.excludeKeywords ?? []), ...(value.excludeTags ?? [])]),
-    minTopicIndex: value.minTopicIndex ?? 10000, maxTopics: value.maxTopics ?? 3,
-    minVideoLikes: value.minVideoLikes ?? 100, maxVideos: value.maxVideos ?? 40,
+    minTopicIndex: value.minTopicIndex ?? 10000, maxTopics: value.maxTopics ?? 5,
+    minVideoLikes: value.minVideoLikes ?? 500, maxVideos: value.maxVideos ?? 100,
   };
   for (const key of ['minTopicIndex', 'minVideoLikes', 'maxTopics', 'maxVideos'] as const)
     if (!Number.isSafeInteger(policy[key]) || policy[key] < 1) throw new Error('invalid_collection_limit');
-  if (policy.minVideoLikes < 100 || policy.maxTopics > 5 || policy.maxVideos > 200) throw new Error('invalid_collection_limit');
+  if (policy.minVideoLikes < 500 || policy.maxTopics > 5 || policy.maxVideos > 200) throw new Error('invalid_collection_limit');
   return policy;
 }
 function excluded(text: any, policy: CollectionPolicy) {
@@ -37,6 +37,7 @@ export function videoFacts(row: any) {
     fans: count(row.fans), duration: count(row.duration), authorName: String(row.nickname ?? row.author_name ?? ''),
     secUid: row.sec_uid ?? row.author?.sec_uid ?? null, authorId: row.author_id ? String(row.author_id) : null,
     publishedAt: row.createTime ?? row.create_time ?? null,
+    badges: [Number(row.isLowFansButHot) === 1 && 'lowFansHot', Number(row.isHighFansRiseRate) === 1 && 'highFansRise', Number(row.isHighLikeRate) === 1 && 'highLikeRate', Number(row.isHighPlayOverRate) === 1 && 'highPlayOver'].filter(Boolean) as string[],
   };
 }
 
@@ -66,8 +67,12 @@ export class Discovery {
       .sort((a, b) => b.index - a.index || a.id.localeCompare(b.id)).slice(0, this.policy.maxTopics);
   }
   tasks() {
-    // 话题只看30天指数；不再派生关联任务（数据源保留，需要时恢复派生即可）。
-    return this.keywords.flatMap(keyword => [{type: 'topic_search', keyword, windowDays: 30}, {type: 'videos', keyword}]);
+    // 话题只看30天指数；视频同时采集近7天与近30天两个窗口，地位同等；关联任务已停用（数据源保留）。
+    return this.keywords.flatMap(keyword => [
+      {type: 'topic_search', keyword, windowDays: 30},
+      {type: 'videos', keyword, days: 7},
+      {type: 'videos', keyword, days: 30},
+    ]);
   }
   report() {
     const selectedTopics = this.topics(), merged = new Map<string, any>();
@@ -86,29 +91,34 @@ export class Discovery {
       const metric = sources.find((s: any) => s.facts.likes !== null), text = sources.map((s: any) => s.facts.title+' '+s.facts.tags.join(' ')).join(' ');
       if (!metric || metric.facts.likes < this.policy.minVideoLikes) { rejected.likes++; continue; }
       if (excluded(text,this.policy)) { rejected.keywords++; continue; }
-      const indexed = sources.find((s: any) => s.facts.index !== null), field = (key: string) => sources.map((s: any) => s.facts[key]).find((v: any) => v !== null && v !== '');
-      eligible.push({...item, title: field('title') ?? '', likes: metric.facts.likes, comments: metric.facts.comments,
-        authorName: field('authorName') ?? '', fans: field('fans') ?? null, duration: field('duration') ?? null,
-        publishedAt: field('publishedAt') ?? null, secUid: field('secUid') ?? null,
-        index: indexed?.facts.index ?? null,
-        indexScope: indexed ? {keyword: indexed.capture.keyword, version: indexed.capture.run.version, days: 7} : null, metric});
+      // 两窗口指数同等：各自独立记录，任一来源带指数即附该窗口值（同窗口取最新捕获）。
+      const indexBy: Record<string, number|null> = {7: null, 30: null};
+      for (const s of sources) if (s.capture.days && s.facts.index !== null && indexBy[s.capture.days] === null) indexBy[s.capture.days] = s.facts.index;
+      const scope = sources.map((s: any) => s.capture.keyword).find(Boolean) ?? '';
+      eligible.push({...item, title: sources.map((s: any) => s.facts.title).find(Boolean) ?? '', likes: metric.facts.likes, comments: metric.facts.comments,
+        authorName: sources.map((s: any) => s.facts.authorName).find((v: any) => v !== null && v !== '') ?? '',
+        fans: sources.map((s: any) => s.facts.fans).find((v: any) => v !== null) ?? null,
+        duration: sources.map((s: any) => s.facts.duration).find((v: any) => v !== null) ?? null,
+        publishedAt: sources.map((s: any) => s.facts.publishedAt).find((v: any) => v !== null && v !== '') ?? null,
+        secUid: sources.map((s: any) => s.facts.secUid).find((v: any) => v !== null && v !== '') ?? null,
+        indexBy, keyword: scope, badges: [...new Set(sources.flatMap((s: any) => s.facts.badges ?? []))], metric});
     }
-    // Compare indices within their query/window and share the cap between those groups.
+    // 保留不分窗口主次：按两窗口指数之和在同一关键词内排序，跨关键词轮转共享上限。
+    const total = (v: any) => (v.indexBy[7] ?? 0) + (v.indexBy[30] ?? 0);
     const groups = new Map<string, any[]>(), unknown: any[] = [];
     for (const video of eligible) {
-      if (!video.indexScope) { unknown.push(video); continue; }
-      const scope = JSON.stringify(video.indexScope);
-      if (!groups.has(scope)) groups.set(scope, []);
-      groups.get(scope)!.push(video);
+      if (video.indexBy[7] === null && video.indexBy[30] === null) { unknown.push(video); continue; }
+      if (!groups.has(video.keyword)) groups.set(video.keyword, []);
+      groups.get(video.keyword)!.push(video);
     }
-    const ranked = [...groups].sort(([a], [b]) => a.localeCompare(b)).map(([, rows]) => rows.sort((a: any, b: any) => b.index - a.index || a.id.localeCompare(b.id)));
+    const ranked = [...groups].sort(([a], [b]) => a.localeCompare(b)).map(([, rows]) => rows.sort((a, b) => total(b) - total(a) || a.id.localeCompare(b.id)));
     unknown.sort((a, b) => b.likes - a.likes || a.id.localeCompare(b.id));
     const reserve = Math.min(unknown.length, Math.ceil(this.policy.maxVideos / 5)), videos: any[] = [];
     for (let i = 0; videos.length < this.policy.maxVideos - reserve && ranked.some(g => g.length > i); i++)
       for (const rows of ranked) if (rows[i] && videos.length < this.policy.maxVideos - reserve) videos.push(rows[i]);
     videos.push(...unknown.slice(0, this.policy.maxVideos - videos.length));
 
-    // 达人指数：入选视频按作者归类，近7天指数相加得总体指数；平均指数=总体÷视频数。展示排序见前端。
+    // 达人指数：入选视频按作者归类，近30天指数相加得总体指数；平均指数=总体÷视频数。展示排序见前端。
     const authors = new Map<string, any>();
     for (const video of videos) {
       if (!video.authorName || excluded(video.authorName, this.policy)) continue;
@@ -116,7 +126,7 @@ export class Discovery {
       const key = video.secUid ? 'sec_uid:' + video.secUid : author ? 'index_author:' + author.facts.authorId : 'nickname:' + normalize(video.authorName);
       const entry = authors.get(key) ?? {key, name: video.authorName, videos: [] as any[], totalIndex: 0};
       entry.videos.push(video.id);
-      if (video.index !== null) entry.totalIndex += video.index;
+      if (video.indexBy[30] !== null) entry.totalIndex += video.indexBy[30];
       authors.set(key, entry);
     }
     const selectedAuthors = [...authors.values()].sort((a, b) => b.totalIndex - a.totalIndex || a.key.localeCompare(b.key));

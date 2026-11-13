@@ -36,9 +36,8 @@ export default function App() {
     <header className="sticky top-0 z-40 mb-6 border-b border-line bg-paper/95 py-4 backdrop-blur sm:py-5">
       <div className="flex items-center gap-4 overflow-x-auto">
         <div className="flex shrink-0 items-center gap-3"><img className="h-12 w-12 shrink-0 object-contain" src="/brand/mascot.png" alt="" aria-hidden="true" /><div><div className="font-display text-lg">everyone-content</div><p className="text-xs text-muted">{new Date().toLocaleDateString("zh-CN", { timeZone: "Asia/Shanghai", year: "numeric", month: "long", day: "numeric" })} · 北京时间</p></div></div>
-        {current && <nav className="flex shrink-0 gap-1" aria-label="工作台导航">{TABS.map(([key, label]) => <PillTab key={key} active={tab === key} onClick={() => setTab(key)}>{label}</PillTab>)}</nav>}
+        {current && <nav className="flex shrink-0 items-center gap-1" aria-label="工作台导航">{TABS.map(([key, label]) => <PillTab key={key} active={tab === key} onClick={() => setTab(key)}>{label}</PillTab>)}<RulesMenu /></nav>}
         <div className="ml-auto flex shrink-0 items-center gap-2">
-          <RulesMenu />
           {accounts && accounts.length > 0 && <>
             <label className="sr-only" htmlFor="account-switch">当前运营账号</label>
             <select id="account-switch" className="field max-w-64" value={current?.id ?? ""} onChange={(e) => selectAccount(Number(e.target.value) || null)}>

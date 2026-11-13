@@ -35,13 +35,13 @@ function captures(store: CollectionStore, accountId: number, type: string, targe
   return rows.map(run => {
     const spec = JSON.parse(run.request), parameters = JSON.parse(run.parameters ?? '{}');
     const range = parameters.body?.param ?? parameters.payload?.param;
-    let window: { begin?: string; end: string; days: number } | null = {end: run.version, days: 7};
+    let window: { begin?: string; end: string; days: number } | null = {end: run.version, days: spec.days ?? 7};
     if (type === 'topic_search') {
       const ms = (value: any) => /^\d{8}$/.test(value ?? '') ? Date.parse(`${value.slice(0,4)}-${value.slice(4,6)}-${value.slice(6,8)}T00:00:00Z`) : NaN;
       const days = (ms(range?.end_date) - ms(range?.start_date)) / 86400000 + 1;
       window = days === 30 && range.end_date === run.version ? {begin: range.start_date, end: range.end_date, days} : null;
     }
-    return {type, id: spec.id, keyword: spec.keyword, run, window, data: store.data(run)};
+    return {type, id: spec.id, keyword: spec.keyword, days: spec.days, run, window, data: store.data(run)};
   });
 }
 export function collectionKeywords(db: DatabaseSync, accountId: number, tasks: AccountConfig['index']['tasks'] = []) {
@@ -62,12 +62,14 @@ export function indexSelection(store: CollectionStore, a: any): Discovery {
   const current=topics.filter((c: any)=>c.window&&c.window.end===end);
   // Rank all configured seed queries in one window; never mix a new partial batch with old totals.
   if(current.length===d.keywords.length)for(const capture of current)d.ingest(capture);
-  const videos=captures(store,a.id,'videos',d.keywords).filter((c: any)=>c.run.version===end);
-  for(const capture of videos)d.ingest(capture);
-  d.ready=current.length===d.keywords.length&&videos.length===d.keywords.length;
+  // 视频两窗口同等：每个关键词的近7天与近30天捕获都齐才算就绪。
+  const videoWindow=(days: number)=>captures(store,a.id,'videos',d.keywords.map(k=>`${k}#${days}`)).filter((c: any)=>c.run.version===end);
+  const v7=videoWindow(7),v30=videoWindow(30);
+  for(const capture of [...v7,...v30])d.ingest(capture);
+  d.ready=current.length===d.keywords.length&&v7.length===d.keywords.length&&v30.length===d.keywords.length;
   d.pending={
     topicSearch:d.keywords.filter(k=>!current.some((c: any)=>c.keyword===k)),
-    videos:d.keywords.filter(k=>!videos.some((c: any)=>c.keyword===k)),
+    videos:d.keywords.filter(k=>!v7.some((c: any)=>c.keyword===k)||!v30.some((c: any)=>c.keyword===k)),
   };
   return d;
 }

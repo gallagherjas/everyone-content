@@ -145,7 +145,7 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     await act(async () => { saveRules.click(); });
     assert.deepEqual(accounts[0].config.index.discovery.excludeKeywords, ['广告']); // 保存筛选参数不覆盖关键词页已存的排除词
     assert.equal(accounts[0].config.index.discovery.minTopicIndex, 3);
-    assert.equal(accounts[0].config.index.discovery.minVideoLikes, 100);
+    assert.equal(accounts[0].config.index.discovery.minVideoLikes, 500);
     assert.equal(button('保存并重新筛选').disabled, true);
   } finally {
     await act(async () => { root.unmount(); });

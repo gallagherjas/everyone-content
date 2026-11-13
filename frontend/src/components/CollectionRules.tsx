@@ -6,9 +6,9 @@ import { words } from './ExcludeKeywords';
 type IndexConfig = AccountConfig['index'];
 const limits = [
   ['minTopicIndex', '话题指数下限（30天）', 10000, 1, undefined],
-  ['minVideoLikes', '点赞数下限', 100, 100, undefined],
-  ['maxTopics', '话题保留数', 3, 1, 5],
-  ['maxVideos', '视频保留数', 40, 1, 200],
+  ['minVideoLikes', '点赞数下限', 500, 500, undefined],
+  ['maxTopics', '话题保留数', 5, 1, 5],
+  ['maxVideos', '视频保留数', 100, 1, 200],
 ] as const;
 function draftOf(index: IndexConfig): IndexConfig {
   const policy = index.discovery ?? {};

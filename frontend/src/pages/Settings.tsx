@@ -66,10 +66,11 @@ export default function SettingsPage({ current, onUpdate }: { current: Account; 
       <KeepAlive active={section === "sources"}>
         <section className="panel space-y-5">
           <h2 className="font-display text-xl">关键词筛选</h2>
-          {/* 采集词与排除词两块镜像排列：标签+计数 → 说明 → 列表 → 输入行 */}
+          {/* 采集词与排除词两块镜像排列：标签+计数 → 说明 → 输入行 → 列表 */}
           <div className="space-y-2">
             <label className="block text-sm font-medium" htmlFor="source-keyword">采集关键词<span className="ml-2 text-xs font-normal text-muted">{src.keywords.length} 个</span></label>
             <p className="text-xs leading-6 text-muted" id="source-keyword-hint">启用抖音指数后用于话题和视频查询，未启用时仅匹配已有的公开作品。</p>
+            <div className="flex gap-2"><input id="source-keyword" className="field flex-1" value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="例如：效率工具、职场技能、日常生活" aria-label="新增关键词" maxLength={80} disabled={archived} /><button className="btn-primary shrink-0" disabled={archived || busy || !keyword.trim()} onClick={() => action(async () => { await api("/api/keywords", { method: "POST", body: JSON.stringify({ keyword }) }); setKeyword(""); })}>添加</button></div>
             <div className="space-y-2">{keywordPage.slice.map((s) => (
               <div key={s.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-paper px-4 py-3">
                 <span className="text-sm">{s.name}{s.note && <span className="ml-3 text-xs text-muted">{s.note}</span>}</span>
@@ -77,7 +78,6 @@ export default function SettingsPage({ current, onUpdate }: { current: Account; 
               </div>
             ))}{!src.keywords.length && <p className="text-sm text-muted">尚未添加</p>}</div>
             <Pager {...keywordPage} />
-            <div className="flex gap-2"><input id="source-keyword" className="field flex-1" value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="例如：效率工具、职场技能、日常生活" aria-label="新增关键词" maxLength={80} disabled={archived} /><button className="btn-primary shrink-0" disabled={archived || busy || !keyword.trim()} onClick={() => action(async () => { await api("/api/keywords", { method: "POST", body: JSON.stringify({ keyword }) }); setKeyword(""); })}>添加</button></div>
           </div>
           <ExcludeKeywords disabled={archived} />
         </section>

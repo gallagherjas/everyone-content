@@ -105,7 +105,7 @@ test('账号隔离、画像生效、指数配置与发布登记可通过本地AP
     await request(`/api/context?strategy_sha=${active.sha}`, first.id, 'GET', undefined, 404);
     await request('/api/strategy/draft', second.id, 'PUT', { docs: { 'account-profile.md': profile }, base_sha: initial.sha }, 409);
     await request('/api/keywords', second.id, 'POST', { keyword: '阳台种花' }, 201);
-    const rules = { discovery: { minTopicIndex: 10000, maxTopics: 3, minVideoLikes: 100, maxVideos: 40, excludeKeywords: ['广告'] }, tasks: [] };
+    const rules = { discovery: { minTopicIndex: 10000, maxTopics: 5, minVideoLikes: 500, maxVideos: 100, excludeKeywords: ['广告'] }, tasks: [] };
     await request('/api/collection/config', second.id, 'PUT', { index: rules });
     assert.deepEqual((await configuredAccount()).setup.missing, ['index_auth']);
     assert.deepEqual((await request('/api/sources', first.id)).keywords, []);
