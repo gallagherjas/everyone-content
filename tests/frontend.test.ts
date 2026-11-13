@@ -50,7 +50,9 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
       accounts.push(data);
     }
     else if (url.pathname === '/api/accounts') data = accounts;
-    else if (url.pathname === '/api/collection') data = { tasks: [], runs, budgets: [], credentials: {}, discovery: null };
+    else if (url.pathname === '/api/collection') data = { tasks: [], runs, budgets: [], credentials: {}, queue: { total: 0, due: 0 }, discovery: null };
+    else if (url.pathname === '/api/collection/progress') data = { running: false, progress: null };
+    else if (url.pathname === '/api/bloggers') data = [];
     else if (url.pathname === '/api/monitor') data = monitorData;
     else if (/^\/api\/auth\/[\w-]+$/.test(url.pathname)) data = { provider: url.pathname.split('/').at(-1), label: '平台', status: 'missing', configured: false, message: '尚未连接。' };
     else if (url.pathname === '/api/sources') data = { keywords: [] };
@@ -103,26 +105,26 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     await edit(field('新账号名称'), '账号2');
     await click('＋ 添加');
     await switchAccount(1);
-    await navigate('指数采集');
+    await navigate('指数');
     assert.equal(count('/api/collection'), 1); assert.equal(count('/api/monitor'), 0);
     assert.equal(timers.size, 1);
     await navigate('数据监控'); assert.equal(timers.size, 0);
     const monitorLoads = count('/api/monitor'); assert.equal(monitorLoads, 1);
     window.scrollTo(0, 420);
-    await navigate('设置'); await click('采集设置');
+    await navigate('采集'); await click('授权与定时');
     assert.match(window.document.body.textContent, /连接平台/);
     const limit = visible('input[type="number"]')[0]; await edit(limit, '3');
     const configLoads = count('/api/collection/config');
-    await click('账号画像'); await edit(field('账号画像正文'), '尚未保存的画像');
-    await click('采集设置'); assert.equal(visible('input[type="number"]')[0].value, '3');
+    await navigate('设置'); await click('账号画像'); await edit(field('账号画像正文'), '尚未保存的画像');
+    await navigate('采集'); await click('授权与定时'); assert.equal(visible('input[type="number"]')[0].value, '3');
     assert.equal(count('/api/collection/config'), configLoads);
     await navigate('数据监控'); assert.equal(count('/api/monitor'), monitorLoads); assert.equal(scroll, 420);
-    await navigate('指数采集'); await click('关键词'); await edit(field('新增关键词'), '新关键词'); await click('添加');
+    await navigate('采集'); await click('采集词'); await edit(field('新增关键词'), '新关键词'); await click('添加');
     assert.equal(requests.filter(request => request.method === 'POST' && request.url.pathname === '/api/keywords').length, 1);
     await edit(field('新增排除关键词'), '广告'); await act(async () => { window.document.querySelector('button[aria-label="添加排除关键词"]').click(); }); // 排除词增删即时保存并重新筛选
     assert.deepEqual(accounts[0].config.index.discovery.excludeKeywords, ['广告']);
     assert.equal(count('/api/monitor'), monitorLoads); // Hidden views do not fetch until needed.
-    await navigate('指数采集'); assert.equal(timers.size, 1);
+    await navigate('指数'); assert.equal(timers.size, 1);
     const collectionLoads = count('/api/collection');
     runs.push({ id: 1, provider: 'index', operation: 'videos', target: '1', status: 'ok', observed_at: '2026-11-09 04:00:00', version: null, error: null });
     await act(async () => { [...timers.values()][0](); });

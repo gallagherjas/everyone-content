@@ -3,12 +3,10 @@ import { useApi, type Account } from "../api";
 import { Page } from "../components/Layout";
 import StrategyEditor from "../components/StrategyEditor";
 import WritingCorpusEditor from "../components/WritingCorpus";
-import CollectionSchedule from "../components/CollectionSchedule";
-import PlatformAuthorization from "../components/PlatformAuthorization";
 import { ConfirmBtn, Msg } from "../components/Common";
 import { KeepAlive } from "../components/PageCache";
 
-const SECTIONS = [["account", "账号资料"], ["strategy", "账号画像"], ["rules", "采集设置"], ["writing", "写作语料"]];
+const SECTIONS = [["account", "账号资料"], ["strategy", "账号画像"], ["writing", "写作语料"]];
 
 export default function SettingsPage({ current, onUpdate }: { current: Account; onUpdate: (account: Account) => void }) {
   const api = useApi();
@@ -43,14 +41,6 @@ export default function SettingsPage({ current, onUpdate }: { current: Account; 
             : <ConfirmBtn size="md" label="归档账号" confirmLabel="确认归档" disabled={busy} onConfirm={() => save({ status: "archived" })} />}
         </div>
       </section></KeepAlive>
-      <KeepAlive active={section === "rules"}>
-        {/* 采集设置合一个容器：平台连接与各来源定时；指数筛选参数在指数采集页 */}
-        <section className="panel space-y-6">
-          <h2 className="font-semibold text-xl">采集设置</h2>
-          <PlatformAuthorization disabled={archived} />
-          <CollectionSchedule account={current} onSaved={onUpdate} />
-        </section>
-      </KeepAlive>
       <KeepAlive active={section === "strategy"}><StrategyEditor disabled={archived} /></KeepAlive>
       <KeepAlive active={section === "writing"}><WritingCorpusEditor account={current} /></KeepAlive>
       {msg && <Msg tone={msg.ok ? "ok" : "error"}>{msg.text}</Msg>}

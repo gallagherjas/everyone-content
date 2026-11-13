@@ -33,7 +33,7 @@ export default function BloggersPage() {
   const [rows, setRows] = useState<BloggerRow[]>([]);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [active, setActive] = useState<string>("");
-  const [keyword, setKeyword] = useState("");
+
   const [busy, setBusy] = useState(false), [failed, setFailed] = useState(false), [message, setMessage] = useState("");
   const load = useCallback(() => api<BloggerRow[]>("/api/bloggers").then(setRows).catch(() => setRows([])), [api]);
   useCachedLoad('bloggers', load);
@@ -65,18 +65,6 @@ export default function BloggersPage() {
     ...pending.map(p => ({ key: `s${p.id}`, label: `${p.name}（解析中）` })),
   ]}>
     <div className="space-y-5">
-      <section className="panel">
-        <h3 className="font-semibold text-lg">添加博主</h3>
-        <p className="mt-2 text-sm text-muted">输入抖音昵称，经抖音指数搜索定位后开始追踪；添加消耗 1 次额度，之后每个博主每天消耗 1 次作品采集。</p>
-        <div className="mt-3 flex gap-2">
-          <input className="field min-w-0 flex-1" value={keyword} onChange={e => setKeyword(e.target.value)} placeholder="例如：AI 造物笔记" aria-label="博主昵称" maxLength={80}
-            onKeyDown={e => { if (e.key === "Enter" && !e.nativeEvent.isComposing) void act(async () => { await api("/api/bloggers", { method: "POST", body: JSON.stringify({ keyword }) }); setKeyword(""); load(); }, "已登记昵称，解析完成后出现在列表。"); }} />
-          <button className="btn-primary shrink-0" disabled={busy || !keyword.trim()}
-            onClick={() => void act(async () => { await api("/api/bloggers", { method: "POST", body: JSON.stringify({ keyword }) }); setKeyword(""); load(); }, "已登记昵称，解析完成后出现在列表。")}>添加</button>
-        </div>
-        {pending.length > 0 && <p className="mt-2 text-sm text-muted">待解析：{pending.map(p => `${p.name}${p.status === "paused" ? "（未找到）" : ""}`).join("、")}</p>}
-      </section>
-
       {active.startsWith("s") && (
         <section className="panel"><h3 className="font-semibold text-lg">{pending.find(p => `s${p.id}` === active)?.name}</h3>
           <p className="mt-2 text-sm text-muted">{pending.find(p => `s${p.id}` === active)?.status === "paused"
@@ -141,7 +129,7 @@ export default function BloggersPage() {
         </>
       )}
 
-      {!bloggers.length && !pending.length && <section className="panel"><p className="text-sm text-muted">尚未追踪博主；在上方输入昵称添加，数据经抖音指数采集。</p></section>}
+      {!bloggers.length && !pending.length && <section className="panel"><p className="text-sm text-muted">尚未追踪博主；到「采集 → 博主」输入昵称开始追踪。</p></section>}
       {message && <Msg tone={failed ? "error" : "ok"}>{message}</Msg>}
     </div>
   </Page>;
