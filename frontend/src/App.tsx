@@ -4,10 +4,10 @@ import { api, AccountContext, type Account } from "./api";
 import { Msg, PillTab, Tag } from "./components/Common";
 import CollectionPage from "./pages/Collection";
 import SettingsPage from "./pages/Settings";
-import ContentsPage from "./pages/Contents";
+import MonitorPage from "./pages/Monitor";
 import { KeepAlive, PageCacheProvider } from "./components/PageCache";
 import RulesMenu from "./components/RulesMenu";
-const TABS = [["collection", "采集"], ["contents", "已发布"], ["settings", "设置"]];
+const TABS = [["monitor", "数据监控"], ["collection", "指数采集"], ["settings", "设置"]];
 const ACCOUNT_KEY = "everyone-content-selected-account";
 
 /** 顶栏账号下拉:切换与新建同面板,面板挂 body 避开顶栏横向滚动裁剪(同 RulesMenu) */
@@ -49,7 +49,7 @@ function AccountSelect({ accounts, current, onPick, onCreate }: {
         </div>
         <div className="max-h-72 overflow-auto pt-1">
           {accounts.map((a) => (
-            <button type="button" key={a.id} onClick={() => { onPick(a.id); setOpen(false); }}
+            <button type="button" key={a.id} aria-label={`切换到 ${a.name}`} onClick={() => { onPick(a.id); setOpen(false); }}
               className={`flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1 text-left text-sm transition ${a.id === current?.id ? "bg-brand/10 font-medium text-brand" : "hover:bg-canvas"}`}>
               <span className="truncate">{a.name}</span>
               {a.status === "archived" && <Tag tone="fade">已归档</Tag>}
@@ -62,7 +62,7 @@ function AccountSelect({ accounts, current, onPick, onCreate }: {
 }
 
 export default function App() {
-  const [tab, setTab] = useState("collection"), [accounts, setAccounts] = useState<Account[] | null>(null);
+  const [tab, setTab] = useState("monitor"), [accounts, setAccounts] = useState<Account[] | null>(null);
   const [id, setId] = useState<number | null>(() => Number(localStorage.getItem(ACCOUNT_KEY)) || null);
   const [error, setError] = useState(""), [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -87,7 +87,7 @@ export default function App() {
   return <div className="mx-auto min-h-screen max-w-7xl px-4 pb-16 sm:px-6">
     <header className="sticky top-0 z-40 mb-6 border-b border-line/70 py-4 backdrop-blur sm:py-5">
       <div className="flex items-center gap-4 overflow-x-auto">
-        <div className="flex shrink-0 items-center gap-3"><img className="h-12 w-12 shrink-0 object-contain" src="/brand/mascot.png" alt="" aria-hidden="true" /><div><div className="text-lg font-semibold">everyone-content</div><p className="text-xs text-muted">{new Date().toLocaleDateString("zh-CN", { timeZone: "Asia/Shanghai", year: "numeric", month: "long", day: "numeric" })} · 北京时间</p></div></div>
+        <div className="flex shrink-0 items-center gap-3"><img className="h-12 w-12 shrink-0 object-contain" src="/brand/mascot.png" alt="" aria-hidden="true" /><div className="text-lg font-semibold">everyone-content</div></div>
         {current && <nav className="flex shrink-0 items-center gap-0.5 rounded-full bg-ink/[0.06] p-1" aria-label="工作台导航">{TABS.map(([key, label]) => <PillTab key={key} active={tab === key} onClick={() => setTab(key)}>{label}</PillTab>)}</nav>}
         <div className="ml-auto flex shrink-0 items-center gap-3">
           <RulesMenu />
@@ -98,8 +98,8 @@ export default function App() {
     {error && <div className="mb-4"><Msg tone="error">{error}</Msg></div>}
     {current && <AccountContext.Provider value={current.id}><PageCacheProvider key={current.id}><main>
       {current.status === "archived" && tab !== "settings" && <p className="mb-5 text-sm text-warn">当前账号已归档，可查看历史；恢复账号请进入设置。</p>}
-      <KeepAlive active={tab === "collection"}><CollectionPage account={current} /></KeepAlive>
-      <KeepAlive active={tab === "contents"}><ContentsPage archived={current.status === "archived"} /></KeepAlive>
+      <KeepAlive active={tab === "monitor"}><MonitorPage /></KeepAlive>
+      <KeepAlive active={tab === "collection"}><CollectionPage account={current} onUpdate={update} /></KeepAlive>
       <KeepAlive active={tab === "settings"}><SettingsPage current={current} onUpdate={update} /></KeepAlive>
     </main></PageCacheProvider></AccountContext.Provider>}
     {accounts === null && !error && <p className="text-sm text-muted">正在加载账号…</p>}

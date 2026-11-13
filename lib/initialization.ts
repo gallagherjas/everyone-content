@@ -34,7 +34,7 @@ export function initializationStatus(db: DatabaseSync, id: number) {
 // 日常入口仅查SQLite，不读取画像、Git、Skill或采集响应。
 export function initializationOverview(db: DatabaseSync) {
   const rows = db.prepare(`SELECT a.id,a.name,a.status,a.config,${profileState},
-    EXISTS(SELECT 1 FROM collection_credentials c WHERE c.account_id=a.id) index_auth_configured
+    EXISTS(SELECT 1 FROM collection_credentials c WHERE c.account_id=a.id AND c.provider='index') index_auth_configured
     ${accountProfiles} ORDER BY a.id`).all();
   return { app: 'everyone-content', accounts: rows.map(row => {
     const profile = completion(row);

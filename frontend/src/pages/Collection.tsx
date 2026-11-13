@@ -1,7 +1,9 @@
 import { useCallback,useEffect,useRef,useState } from "react";
 import { useApi,fmtNum,fmtTime,type Account } from "../api";
-import { FilterSelect, HoverTip, Msg } from "../components/Common";
+import { ConfirmBtn,FilterSelect,HoverTip,Msg,Tag,type Tone } from "../components/Common";
 import { Page } from "../components/Layout";
+import CollectionRules from "../components/CollectionRules";
+import ExcludeKeywords from "../components/ExcludeKeywords";
 import { names,reason,statuses } from "../labels";
 import { useCachedLoad,useInvalidatePages,usePageVisible } from "../components/PageCache";
 import Pager,{usePaged} from "../components/Pager";
@@ -12,19 +14,30 @@ interface Topic {id:string;name:string;index:number;window:{begin:string;end:str
 interface Author {key:string;name:string;videos:string[];totalIndex:number}
 // 视频官方标记的四色徽章(无边框浅底),未识别类型落灰
 const BADGE_TONES:Record<string,string>={lowFansHot:'bg-blue/10 text-blue',highFansRise:'bg-brand/10 text-brand',highLikeRate:'bg-rose/10 text-rose',highPlayOver:'bg-violet/10 text-violet'};
-interface State {runs:Run[];budgets:{provider:string;daily_limit:number;used:number}[];indexCredential:boolean;discovery:null|{ready:boolean;keywords:string[];topics:Topic[];videos:Video[];authors:Author[];pending:{topicSearch:string[];videos:string[]};counts:{uniqueVideos:number;eligibleVideos:number;retainedVideos:number;rejected:{likes:number;keywords:number}}}}
-export default function CollectionPage({account}:{account:Account}) {
+interface State {runs:Run[];budgets:{provider:string;daily_limit:number;used:number}[];credentials:Record<string,boolean>;discovery:null|{ready:boolean;keywords:string[];topics:Topic[];videos:Video[];authors:Author[];pending:{topicSearch:string[];videos:string[]};counts:{uniqueVideos:number;eligibleVideos:number;retainedVideos:number;rejected:{likes:number;keywords:number}}}}
+interface Source {id:number;kind:string;source_key:string;name:string;status:string;note:string}
+interface Sources {keywords:Source[]}
+export default function CollectionPage({account,onUpdate}:{account:Account;onUpdate:(account:Account)=>void}) {
   const api=useApi(),archived=account.status==="archived";
   const [state,setState]=useState<State|null>(null),[view,setView]=useState("discovery"),[authorSort,setAuthorSort]=useState<"total"|"average">("total"),[videoSort,setVideoSort]=useState<"7"|"30">("30"),[videoBadge,setVideoBadge]=useState(""),[runDetail,setRunDetail]=useState<{id:number;text:string}|null>(null),[message,setMessage]=useState(""),[busy,setBusy]=useState(false),[failure,setFailure]=useState(false),[percent,setPercent]=useState<number|null>(null);
+  const [src,setSrc]=useState<Sources>({keywords:[]}),[keyword,setKeyword]=useState("");
   const visible=usePageVisible(),invalidate=useInvalidatePages(),lastRuns=useRef<string|null>(null);
   const load=useCallback(()=>api<State>("/api/collection").then(value=>{
     setState(value);
     const runs=value.runs.map(run=>`${run.id}:${run.status}`).join(',');
-    if(lastRuns.current!==null&&lastRuns.current!==runs)invalidate(['contents','sources']);
+    if(lastRuns.current!==null&&lastRuns.current!==runs)invalidate(['monitor','sources']);
     lastRuns.current=runs;
   }),[api,invalidate]);
   const refresh=useCallback(()=>{load().catch(e=>setMessage(String(e)));},[load]);
   useCachedLoad('collection',refresh);
+  const loadSources=useCallback(()=>api<Sources>("/api/sources").then(setSrc).catch(e=>{setFailure(true);setMessage(String(e));}),[api]);
+  useCachedLoad('sources',loadSources);
+  const srcStatus=(s:string):{label:string;tone:Tone}=>s==="ready"?{label:"已启用",tone:"success"}:{label:"已暂停",tone:"fade"};
+  const sourceRowActions=(s:Source)=>{const st=srcStatus(s.status);return <>
+    <Tag tone={st.tone}>{st.label}</Tag>
+    <button className="btn-sm" disabled={archived||busy} onClick={()=>action(async()=>{await api(`/api/sources/${s.id}`,{method:"PUT",body:JSON.stringify({status:s.status==="ready"?"paused":"ready"})});},"状态已更新。")}>{s.status==="ready"?"暂停":"启用"}</button>
+    <ConfirmBtn label="移出" confirmLabel="确认移出" disabled={archived||busy} onConfirm={()=>action(async()=>{await api(`/api/sources/${s.id}`,{method:"DELETE"});},"已移出。")}/>
+  </>;};
   useEffect(()=>{if(!visible)return;const timer=setInterval(refresh,10000);return()=>clearInterval(timer);},[visible,refresh]);
   const wasRunning=useRef(false);
   useEffect(()=>{
@@ -45,16 +58,17 @@ export default function CollectionPage({account}:{account:Account}) {
   const rankedVideos=videos.filter(v=>!videoBadge||v.badges?.includes(videoBadge)).sort((a,b)=>(b.indexBy[videoSort]??-1)-(a.indexBy[videoSort]??-1)||a.id.localeCompare(b.id));
   // 达人排序在前端切换：总体指数或平均指数（总体÷视频数），展示前10名。
   const rankedAuthors=[...(discovery?.authors??[])].sort((a,b)=>authorSort==="total"?b.totalIndex-a.totalIndex||a.key.localeCompare(b.key):b.totalIndex/b.videos.length-a.totalIndex/a.videos.length||a.key.localeCompare(b.key)).slice(0,10);
-  const topicPage=usePaged(discovery?.topics??[]),videoPage=usePaged(rankedVideos),runPage=usePaged(state?.runs??[]);
-  return <Page head="采集" active={view} onPick={key=>{setView(key);setMessage("");}} items={[
+  const topicPage=usePaged(discovery?.topics??[]),videoPage=usePaged(rankedVideos),runPage=usePaged(state?.runs??[]),keywordPage=usePaged(src.keywords);
+  return <Page head="指数采集" active={view} onPick={key=>{setView(key);setMessage("");}} items={[
     {key:"discovery",label:"话题指数",count:discovery?.topics.length},
     {key:"videos",label:"视频指数",count:discovery?.videos.length},
     {key:"authors",label:"达人指数",count:rankedAuthors.length},
-    {key:"runs",label:"采集记录",count:state?.runs.length},
+    {key:"runs",label:"采集记录"},
+    {key:"rules",label:"采集设置"},
   ]}>
     <div className="space-y-5">
       {["discovery","videos","authors"].includes(view)&&<section className="panel flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-baseline gap-x-4"><h2 className="font-semibold text-xl">采集</h2><span className="text-sm" title="每日采集次数上限，跨账号共用；每天北京时间08:00重置">今日 {state?.budgets.find(b=>b.provider==='index')?.used ?? '—'}/{state?.budgets.find(b=>b.provider==='index')?.daily_limit ?? '—'}</span><span className="text-sm text-muted">根据本帐号配置进行采集，可点击手动采集后即时采集</span></div>
+        <div className="flex flex-wrap items-baseline gap-x-4"><h2 className="font-semibold text-xl">指数采集</h2><span className="text-sm" title="每日采集次数上限，跨账号共用；每天北京时间08:00重置">今日 {state?.budgets.find(b=>b.provider==='index')?.used ?? '—'}/{state?.budgets.find(b=>b.provider==='index')?.daily_limit ?? '—'}</span><span className="text-sm text-muted">根据本帐号配置进行采集，可点击手动采集后即时采集</span></div>
         <div className="flex flex-wrap items-center gap-4">{percent===null?<button className="btn-primary" disabled={archived||busy} onClick={async()=>{try{await api("/api/run/collect",{method:"POST"});wasRunning.current=true;setPercent(0);setMessage("");}catch(e){setFailure(true);setMessage(String(e));}}}>手动采集</button>:<button className="btn-progress"><span className="absolute inset-0 flex items-center justify-center">{percent}%</span><span className="absolute inset-0 flex items-center justify-center bg-brand text-white transition-[clip-path] duration-500" style={{clipPath:`inset(0 ${100-percent}% 0 0)`}}>{percent}%</span></button>}</div>
       </section>}
       {['discovery','videos','authors'].includes(view)&&(discovery?<>
@@ -72,8 +86,23 @@ export default function CollectionPage({account}:{account:Account}) {
           <Pager {...videoPage}/>
         </section>}
         {view==="authors"&&<section className="panel"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold text-lg">达人指数</h3><FilterSelect label="达人口径筛选" value={authorSort} onChange={value=>setAuthorSort(value as "total"|"average")} options={[["total","按总体指数"],["average","按平均指数"]]}/></div><p className="mt-2 text-sm text-muted">入选视频按作者归类，近30天指数相加为总体指数，平均指数=总体÷视频数；展示前10名。昵称不能作为已核实身份。</p>{!rankedAuthors.length&&<p className="mt-4 text-sm text-muted">{discovery.ready?'暂无满足当前规则的达人指数。':'数据尚未采齐，采集进度请查看“话题指数”。'}</p>}<div className="mt-3 space-y-3">{rankedAuthors.map((a,i)=><div className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3 text-sm" key={a.key}><span className="flex items-baseline gap-2"><a className="link" href={a.key.startsWith('sec_uid:')?`https://www.douyin.com/user/${a.key.slice(8)}`:`https://www.douyin.com/search/${encodeURIComponent(a.name)}`} target="_blank" rel="noreferrer">{i+1}. {a.name}</a>{a.key.startsWith('nickname:')&&<span className="text-xs text-muted">主页身份待核实</span>}</span><span className="text-xs text-muted">{a.videos.length}条视频 · 总体 {fmtNum(a.totalIndex)} · 平均 {fmtNum(a.totalIndex/a.videos.length)}</span></div>)}</div></section>}
-      </>:<section className="panel"><p className="text-sm text-muted">{state?state.indexCredential?'暂无发现数据；可在“设置 → 关键词”调整采集词与排除词，在“设置 → 采集设置”调整筛选参数。':'尚未连接抖音指数；请到“设置 → 采集设置”扫码登录。':'正在加载采集数据…'}</p></section>)}
+      </>:<section className="panel"><p className="text-sm text-muted">{state?state.credentials?.index?'暂无发现数据；可在左侧「关键词」调整采集词与排除词，在「采集设置」调整筛选参数。':'尚未连接抖音指数；请到“设置 → 采集设置”扫码登录。':'正在加载采集数据…'}</p></section>)}
       {view==="runs"&&<section className="panel"><h3 className="font-semibold text-lg">最近采集记录</h3><p className="mt-2 text-sm text-muted">时间均为北京时间。“查看记录”展示本次采集的入库数据。</p><div className="mt-4 space-y-3">{runPage.slice.map(r=><div key={r.id} className="border-t border-line pt-3 text-sm"><div className="flex flex-wrap justify-between gap-2"><span>{names[r.provider]} · {r.operation} · {r.target}<span className="ml-2 text-xs text-muted">{fmtTime(r.observed_at)}{r.version?` · 数据版本 ${r.version}`:""}</span></span><span>{statuses[r.status]??r.status}{r.error?` · ${reason(r.error)}`:""}{r.status==="ok"&&<a className="link ml-3" href="#" onClick={e=>{e.preventDefault();if(runDetail?.id===r.id){setRunDetail(null);return;}api<{observed_at:string}>(`/api/collection/records/${r.id}`).then(data=>setRunDetail({id:r.id,text:JSON.stringify({...data,observed_at:fmtTime(data.observed_at)},null,2)})).catch(err=>{setFailure(true);setMessage(String(err));});}}>{runDetail?.id===r.id?'收起记录':'查看记录'}</a>}</span></div>{runDetail?.id===r.id&&<div className="codebox mt-2 max-h-96">{runDetail.text}</div>}</div>)}</div>{!state?.runs.length&&<p className="py-4 text-sm text-muted">尚无采集记录；手动采集后生成。</p>}<Pager {...runPage}/></section>}
+      {view==="rules"&&<>
+        <section className="panel space-y-5">
+          <h2 className="font-semibold text-xl">关键词筛选</h2>
+          {/* 采集词与排除词两块镜像排列：标签+计数 → 说明 → 输入行 → 列表 */}
+          <div className="space-y-2">
+            <label className="block text-sm font-medium" htmlFor="source-keyword">采集关键词<span className="ml-2 text-xs font-normal text-muted">{src.keywords.length} 个</span></label>
+            <p className="text-xs leading-6 text-muted">启用抖音指数后用于话题和视频查询，未启用时仅匹配已有的公开作品。</p>
+            <div className="flex gap-2"><input id="source-keyword" className="field flex-1" value={keyword} onChange={e=>setKeyword(e.target.value)} placeholder="例如：效率工具、职场技能、日常生活" aria-label="新增关键词" maxLength={80} disabled={archived}/><button className="btn-primary shrink-0" disabled={archived||busy||!keyword.trim()} onClick={()=>action(async()=>{await api("/api/keywords",{method:"POST",body:JSON.stringify({keyword})});setKeyword("");},"已添加关键词。")}>添加</button></div>
+            <div className="space-y-2">{keywordPage.slice.map(s=><div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-canvas px-4 py-3" key={s.id}><span className="text-sm">{s.name}{s.note&&<span className="ml-3 text-xs text-muted">{s.note}</span>}</span><div className="flex items-center gap-2">{sourceRowActions(s)}</div></div>)}{!src.keywords.length&&<p className="text-sm text-muted">尚未添加</p>}</div>
+            <Pager {...keywordPage}/>
+          </div>
+          <ExcludeKeywords disabled={archived}/>
+        </section>
+        <CollectionRules account={account} onSaved={async value=>onUpdate(value)}/>
+      </>}
       {message&&<Msg tone={failure?"error":"ok"}><span className="block max-h-96 overflow-auto whitespace-pre-wrap break-all">{message}</span></Msg>}
     </div>
   </Page>;

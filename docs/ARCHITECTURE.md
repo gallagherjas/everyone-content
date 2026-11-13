@@ -6,7 +6,7 @@
 everyone-content/
 ├── frontend/                 React 工作台，使用 Vite 构建
 │   ├── src/                   应用入口、账号切换、API 请求与全局样式
-│   │   ├── pages/             采集、已发布、设置三个页面
+│   │   ├── pages/             数据监控、指数采集、设置三个页面
 │   │   └── components/        画像编辑、采集设置、页面缓存和共用组件
 │   ├── public/                品牌与静态资源
 │   └── dist/                  构建生成的前端产物

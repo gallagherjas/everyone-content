@@ -41,6 +41,9 @@ function TimeSelect({ name, times, disabled, onChange }: {
 
 const sources = {
   index: { name: '抖音指数', hint: '按关键词发现话题、视频和达人指数。' },
+  douyin: { name: '抖音创作后台', hint: '每日快照粉丝、获赞、作品与播放。' },
+  xhs: { name: '小红书创作服务', hint: '每日快照粉丝与笔记数据。' },
+  bili: { name: 'B站创作中心', hint: '每日快照粉丝、播放与稿件。' },
 };
 type Settings = Pick<AccountConfig, 'schedules'>;
 const settingsOf = (account: Account): Settings => ({ schedules: account.config.schedules });
@@ -52,6 +55,7 @@ export default function CollectionSchedule({ account, onSaved }: { account: Acco
   const [budgets, setBudgets] = useState<Budget[] | null>(null);
   const [limitDrafts, setLimitDrafts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [failed, setFailed] = useState(false);
+  const [credentials, setCredentials] = useState<Record<string, boolean> | null>(null);
   useEffect(() => {
     let live = true;
     api<Account>('/api/collection/config').then(value => {
@@ -59,9 +63,10 @@ export default function CollectionSchedule({ account, onSaved }: { account: Acco
     }).catch(error => { if (live) { setFailed(true); setMessage(String(error)); } });
     return () => { live = false; };
   }, [api]);
-  const loadBudgets = useCallback(() => api<{ budgets: Budget[] }>('/api/collection').then(s => setBudgets(s.budgets)).catch(() => {}), [api]);
+  const loadBudgets = useCallback(() => api<{ budgets: Budget[]; credentials: Record<string, boolean> }>('/api/collection').then(s => { setBudgets(s.budgets); setCredentials(s.credentials); }).catch(() => {}), [api]);
   useCachedLoad('collection', loadBudgets);
   const disabled = account.status === 'archived' || busy || saved === null;
+  const connected = (provider: CollectionProvider) => credentials?.[provider] === true;
   const dirty = saved !== null && JSON.stringify(draft) !== JSON.stringify(saved);
   const change = (provider: CollectionProvider, patch: Partial<AccountConfig['schedules'][CollectionProvider]>) => {
     setDraft(current => ({ ...current, schedules: { ...current.schedules, [provider]: { ...current.schedules[provider], ...patch } } }));
@@ -95,8 +100,11 @@ export default function CollectionSchedule({ account, onSaved }: { account: Acco
         {COLLECTION_PROVIDERS.map(provider => {
           const schedule = draft.schedules[provider], source = sources[provider];
           const budget = budgets?.find(b => b.provider === provider);
+          // 定时开关的前置条件是该来源已连接；未连接时禁用并提醒，连接成功后经缓存失效自动解除。
+          const needsAuth = credentials !== null && !credentials[provider];
           return <div key={provider} className="space-y-4 rounded-xl border border-line bg-canvas/40 p-4">
-            <Toggle label={`${source.name}定时采集`} hint={source.hint} checked={schedule.enabled} disabled={disabled} onChange={enabled => change(provider, { enabled })} />
+            <Toggle label={`${source.name}定时采集`} hint={source.hint} checked={schedule.enabled} disabled={disabled || !connected(provider)} onChange={enabled => change(provider, { enabled })} />
+            {needsAuth && <p className="text-xs text-warn">尚未连接{source.name}，请先在上方「连接平台」扫码连接，再开启定时。</p>}
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="space-y-1.5 text-sm">
                 <div className="flex items-center gap-2"><span className="min-w-[7.5rem] shrink-0">运行时间</span><TimeSelect name={source.name} times={schedule.times} disabled={disabled} onChange={times => change(provider, { times })} /></div>

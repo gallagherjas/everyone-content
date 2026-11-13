@@ -1,6 +1,6 @@
 import { formatTime } from './time.ts';
 
-export const COLLECTION_PROVIDERS = ['index'] as const;
+export const COLLECTION_PROVIDERS = ['index', 'douyin', 'xhs', 'bili'] as const;
 export type CollectionProvider = typeof COLLECTION_PROVIDERS[number];
 export interface CollectionSchedule {
   enabled: boolean;
@@ -17,7 +17,8 @@ export function defaultSchedules(): CollectionSchedules {
 
 export function validateSchedules(value: unknown): CollectionSchedules {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('定时采集配置无效');
-  if (Object.keys(value).some(provider => provider !== 'index')) throw new Error('只支持抖音指数定时采集');
+  if (Object.keys(value).some(provider => !COLLECTION_PROVIDERS.includes(provider as CollectionProvider)))
+    throw new Error('定时采集配置无效');
   return Object.fromEntries(COLLECTION_PROVIDERS.map(provider => {
     const schedule = (value as CollectionSchedules)[provider];
     if (!schedule || typeof schedule.enabled !== 'boolean' || !Array.isArray(schedule.times)

@@ -18,12 +18,12 @@ function setup() {
     const row = db.prepare('SELECT config FROM accounts WHERE id=?').get(id)!;
     db.prepare('UPDATE accounts SET config=? WHERE id=?').run(JSON.stringify({ ...JSON.parse(row.config as string), schedules }), id);
   };
-  const authorize = (id: number) => db.prepare('INSERT INTO collection_credentials VALUES(?,?,?)').run(id, 'test-only-auth-path', `account:${id}`);
+  const authorize = (id: number) => db.prepare('INSERT INTO collection_credentials VALUES(?,?,?,?)').run(id, 'index', 'test-only-auth-path', `account:${id}`);
   return { db, calls, start, save, authorize };
 }
 test('指数定时默认关闭，按北京时间校验时间与请求上限', () => {
   const schedules = defaultSchedules();
-  assert.deepEqual(Object.keys(schedules), ['index']);
+  assert.deepEqual(Object.keys(schedules), ['index', 'douyin', 'xhs', 'bili']);
   assert.equal(latestScheduleSlot(schedules.index, now), null);
   schedules.index = { enabled: true, times: ['10:30', '09:30', '09:30'], request_limit: 2 };
   assert.deepEqual(validateSchedules(schedules).index.times, ['09:30', '10:30']);

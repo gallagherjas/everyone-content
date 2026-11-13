@@ -20,6 +20,8 @@
 
 /* 页面底:冷白基调,右上浅蓝、左侧浅绿两片柔光,颜色跟随 blue/brand token */
 html {
+  /* 滚动条常驻:内容高度跨节变化时宽度不跳动(轨道透明,无视觉存在) */
+  overflow-y: scroll;
   background:
     radial-gradient(60rem 40rem at 88% -12%, color-mix(in oklab, var(--color-blue) 8%, transparent), transparent 70%),
     radial-gradient(52rem 36rem at -10% 24%, color-mix(in oklab, var(--color-brand) 9%, transparent), transparent 70%),

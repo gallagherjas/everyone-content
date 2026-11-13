@@ -19,20 +19,19 @@ const { migrate } = await import('../db/migrate.ts');
 const { createAccount } = await import('../lib/accounts.ts');
 const { defaultSchedules } = await import('../lib/collection-schedule.ts');
 
-test('首次安装只预置指数每日采集次数上限；再次开库保留用户创建的账号和配置', () => {
+test('首次安装预置各来源采集次数上限；再次开库保留用户创建的账号和配置', () => {
   const db = new DatabaseSync(':memory:');
   try {
     migrate(db, ':memory:');
     for (const table of ['accounts', 'works', 'authors', 'account_sources', 'collection_credentials', 'collection_tasks', 'collection_runs', 'collection_requests', 'contents'])
       assert.equal(db.prepare(`SELECT COUNT(*) n FROM ${table}`).get()!.n, 0, table);
-    assert.deepEqual(db.prepare('SELECT provider FROM collection_limits').all().map(row => row.provider), ['index']);
+    assert.deepEqual(db.prepare('SELECT provider FROM collection_limits').all().map(row => row.provider).sort(), ['bili', 'douyin', 'index', 'xhs']);
     const first = createAccount(db, '我的账号');
     assert.deepEqual(first.config, { schedules: defaultSchedules(), index: { discovery: null, tasks: [] } });
     db.prepare('UPDATE collection_limits SET daily_limit=12').run();
     migrate(db, ':memory:');
     assert.deepEqual(db.prepare('SELECT name FROM accounts').all().map(row => row.name), ['我的账号']);
     assert.equal(db.prepare('SELECT daily_limit FROM collection_limits').get()!.daily_limit, 12);
-    assert.throws(() => db.prepare("INSERT INTO collection_limits VALUES('unsupported',1,1,1)").run(), /CHECK/);
   } finally { db.close(); }
 });
 
@@ -52,7 +51,7 @@ test('v2数据库升级v3：移除博主采集源与作品快照表，关键词�
   } finally { db.close(); }
 });
 
-test('账号隔离、画像生效、指数配置与发布登记可通过本地API完成', async () => {
+test('账号隔离、画像生效与指数配置可通过本地API完成', async () => {
   const reserve = createServer(); reserve.listen(0, '127.0.0.1'); await once(reserve, 'listening');
   const port = (reserve.address() as { port: number }).port;
   await new Promise<void>(resolve => reserve.close(() => resolve()));
@@ -87,7 +86,7 @@ test('账号隔离、画像生效、指数配置与发布登记可通过本地AP
     await request('/api/context', undefined, 'GET', undefined, 400);
     const overview = await request('/api/initialization');
     assert.equal(overview.accounts.find((row: any) => row.account_id === second.id).initialized, false);
-    const login = await request('/api/index-auth', second.id);
+    const login = await request('/api/auth/index', second.id);
     assert.equal(login.configured, false);
     assert.ok(!('cookie' in login));
     const initial = await request('/api/strategy', second.id);
@@ -111,9 +110,9 @@ test('账号隔离、画像生效、指数配置与发布登记可通过本地AP
     assert.deepEqual((await request('/api/sources', first.id)).keywords, []);
     assert.equal((await request('/api/sources', second.id)).keywords[0].name, '阳台种花');
     const collection = await request('/api/collection', second.id);
-    assert.equal(collection.indexCredential, false);
+    assert.deepEqual(collection.credentials, {});
     assert.equal(collection.discovery, null);
-    assert.deepEqual(collection.budgets.map((row: any) => row.provider), ['index']);
+    assert.deepEqual(collection.budgets.map((row: any) => row.provider), ['bili', 'douyin', 'index', 'xhs']);
     await request('/api/run/collect', second.id, 'POST', { only: 'unsupported' }, 400);
     await request('/api/collection/progress?run_id=1', second.id, 'GET', undefined, 404);
     await request('/api/collection/limits', second.id, 'PUT', { provider: 'unsupported', daily_limit: 1 }, 400);
@@ -124,13 +123,10 @@ test('账号隔离、画像生效、指数配置与发布登记可通过本地AP
       assert.equal(db.prepare('SELECT COUNT(*) n FROM task_runs').get()!.n, 0);
       assert.equal(db.prepare('SELECT COUNT(*) n FROM collection_requests').get()!.n, 0);
     } finally { db.close(); }
-    await request('/api/contents', second.id, 'POST', { published_url: 'https://www.douyin.com/video/9000000000000000001', published_at: '2020-01-01T10:00:00+08:00' }, 201);
-    assert.equal((await request('/api/contents', second.id))[0].metrics, null);
-    assert.deepEqual(await request('/api/contents', first.id), []);
     await request(`/api/accounts/${second.id}`, second.id, 'PUT', { status: 'archived' });
     await request('/api/keywords', second.id, 'POST', { keyword: '归档后不得写入' }, 409);
-    await request('/api/index-auth/cancel', second.id, 'POST');
-    await request('/api/index-auth/start', second.id, 'POST', undefined, 409);
+    await request('/api/auth/index/cancel', second.id, 'POST');
+    await request('/api/auth/index/start', second.id, 'POST', undefined, 409);
   } finally {
     const exited = once(child, 'exit'); child.kill(); await exited;
   }

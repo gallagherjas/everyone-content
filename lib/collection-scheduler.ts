@@ -9,8 +9,8 @@ export function runScheduledCollection(
 ) {
   const due = listAccounts(db).filter(account => account.status === 'active').flatMap(account =>
     COLLECTION_PROVIDERS.flatMap(provider => {
-      // 指数功能以“已登记授权文件”为开关；未登记的账号不排定时的指数采集。
-      if (provider === 'index' && !db.prepare('SELECT 1 FROM collection_credentials WHERE account_id=?').get(account.id)) return [];
+      // 各来源以「已登记对应授权文件」为开关；未登记的账号不排该来源的定时采集。
+      if (!db.prepare('SELECT 1 FROM collection_credentials WHERE account_id=? AND provider=?').get(account.id, provider)) return [];
       const schedule = account.config.schedules[provider];
       const slot = latestScheduleSlot(schedule, now);
       if (!slot || db.prepare('SELECT 1 FROM collection_schedule_runs WHERE account_id=? AND provider=? AND scheduled_at=?').get(account.id, provider, slot)) return [];

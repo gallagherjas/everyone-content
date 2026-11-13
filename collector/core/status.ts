@@ -13,7 +13,8 @@ export function collectionStatus(db: DatabaseSync,a: any,store: CollectionStore 
   const budgets=db.prepare(`SELECT l.provider,l.daily_limit,l.per_tick,(SELECT COUNT(*) FROM collection_requests q WHERE q.provider=l.provider AND q.day=date('now')) used
     FROM collection_limits l ORDER BY l.provider`).all() as any[];
   let discovery=null;
-  if(db.prepare('SELECT 1 FROM collection_credentials WHERE account_id=?').get(a.id)&&store)discovery=selectionView(indexSelection(store,a));
+  const credentials=Object.fromEntries((db.prepare('SELECT provider FROM collection_credentials WHERE account_id=?').all(a.id) as any[]).map(r=>[r.provider,true]));
+  if(credentials.index&&store)discovery=selectionView(indexSelection(store,a));
   const queue=db.prepare('SELECT COUNT(*) total,SUM(t.next_run_at<=? AND t.disabled=0) due FROM collection_tasks t JOIN collection_task_accounts x ON x.task_key=t.key WHERE x.account_id=?').get(Date.now(),a.id) as any;
-  return {tasks,runs,budgets,discovery,queue,indexCredential:!!db.prepare('SELECT 1 FROM collection_credentials WHERE account_id=?').get(a.id)};
+  return {tasks,runs,budgets,discovery,queue,credentials};
 }

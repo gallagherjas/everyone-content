@@ -1,24 +1,27 @@
 CREATE TABLE IF NOT EXISTS collection_limits (
-  provider TEXT PRIMARY KEY CHECK(provider='index'),
+  provider TEXT PRIMARY KEY,
   daily_limit INTEGER NOT NULL,
   interval_ms INTEGER NOT NULL,
   per_tick INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS collection_schedule_runs (
   account_id INTEGER NOT NULL REFERENCES accounts(id),
-  provider TEXT NOT NULL CHECK(provider='index'),
+  provider TEXT NOT NULL,
   scheduled_at TEXT NOT NULL,
   run_id INTEGER NOT NULL REFERENCES task_runs(id),
   PRIMARY KEY(account_id,provider,scheduled_at)
 );
-INSERT OR IGNORE INTO collection_limits VALUES ('index',30,2000,10);
+INSERT OR IGNORE INTO collection_limits VALUES
+  ('index',30,2000,10),('douyin',10,3600000,1),('xhs',10,3600000,1),('bili',10,3600000,1);
 CREATE TABLE IF NOT EXISTS collection_credentials (
-  account_id INTEGER PRIMARY KEY REFERENCES accounts(id),
+  account_id INTEGER NOT NULL REFERENCES accounts(id),
+  provider TEXT NOT NULL DEFAULT 'index',
   auth_path TEXT NOT NULL,
-  scope TEXT NOT NULL
+  scope TEXT NOT NULL,
+  PRIMARY KEY(account_id,provider)
 );
 CREATE TABLE IF NOT EXISTS collection_provider_state (
-  provider TEXT NOT NULL CHECK(provider='index'),
+  provider TEXT NOT NULL,
   scope TEXT NOT NULL,
   paused INTEGER NOT NULL DEFAULT 0,
   error TEXT,
@@ -27,7 +30,7 @@ CREATE TABLE IF NOT EXISTS collection_provider_state (
 );
 CREATE TABLE IF NOT EXISTS collection_tasks (
   key TEXT PRIMARY KEY,
-  provider TEXT NOT NULL CHECK(provider='index'),
+  provider TEXT NOT NULL,
   scope TEXT NOT NULL,
   operation TEXT NOT NULL,
   target TEXT NOT NULL,
@@ -53,7 +56,7 @@ CREATE TABLE IF NOT EXISTS collection_task_accounts (
 CREATE TABLE IF NOT EXISTS collection_runs (
   id INTEGER PRIMARY KEY,
   task_key TEXT REFERENCES collection_tasks(key),
-  provider TEXT NOT NULL CHECK(provider='index'),
+  provider TEXT NOT NULL,
   scope TEXT NOT NULL,
   operation TEXT NOT NULL,
   target TEXT NOT NULL,
@@ -80,7 +83,7 @@ CREATE TABLE IF NOT EXISTS collection_run_accounts (
 CREATE TABLE IF NOT EXISTS collection_requests (
   id INTEGER PRIMARY KEY,
   run_id INTEGER NOT NULL REFERENCES collection_runs(id),
-  provider TEXT NOT NULL CHECK(provider='index'),
+  provider TEXT NOT NULL,
   scope TEXT NOT NULL,
   day TEXT NOT NULL,
   at_ms INTEGER NOT NULL,

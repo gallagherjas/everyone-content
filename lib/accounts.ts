@@ -41,7 +41,9 @@ export function account(db: DatabaseSync, id: number): Account {
     | (Omit<Account, 'config'> & { config: string })
     | undefined;
   if (!r) throw new InputError('账号不存在，请重新选择', 404);
-  return { ...r, config: JSON.parse(r.config) };
+  // 旧账号配置缺新来源的键：读取时补默认定时，保存时经 validateConfig 落全。
+  const config = JSON.parse(r.config);
+  return { ...r, config: { ...config, schedules: { ...defaultSchedules(), ...config.schedules } } };
 }
 export function activeAccount(db: DatabaseSync, id: number) {
   const a = account(db, id);

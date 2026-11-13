@@ -36,9 +36,11 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     timers.set(++timerId, () => callback(...args)); return timerId;
   });
   replace('clearInterval', id => { if (!timers.delete(id)) originalClear(id); });
-  const config = { schedules: Object.fromEntries(['index'].map(provider => [provider, { enabled: false, times: ['10:00'], request_limit: 10 }])), index: { discovery: null, tasks: [] } };
+  const config = { schedules: Object.fromEntries(['index', 'douyin', 'xhs', 'bili'].map(provider => [provider, { enabled: false, times: ['10:00'], request_limit: 10 }])), index: { discovery: null, tasks: [] } };
   const accounts = [];
   const requests = [], runs = [];
+  const emptyPlatform = () => ({ configured: false, paused: false, error: null, latest: null, deltaToday: null, delta7d: null, series: [] });
+  const monitorData = { platforms: { douyin: emptyPlatform(), xhs: emptyPlatform(), bili: emptyPlatform() }, total: { fans: 0, deltaToday: null, delta7d: null, platforms: 0 } };
   replace('fetch', async (input, init = {}) => {
     const url = new URL(String(input), window.location.href), account = Number(init.headers?.['x-everyone-content-account'] ?? 0), method = init.method ?? 'GET';
     requests.push({ url, account, method });
@@ -48,10 +50,10 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
       accounts.push(data);
     }
     else if (url.pathname === '/api/accounts') data = accounts;
-    else if (url.pathname === '/api/collection') data = { tasks: [], runs, budgets: [], indexCredential: false, discovery: null };
-    else if (url.pathname === '/api/contents') data = Array.from({ length: 25 }, (_, n) => ({ id: account * 1000 + n + 1, published_url: `https://www.douyin.com/video/${account}-${n + 1}`, published_at: '2026-11-09 04:00:00', metrics: null }));
+    else if (url.pathname === '/api/collection') data = { tasks: [], runs, budgets: [], credentials: {}, discovery: null };
+    else if (url.pathname === '/api/monitor') data = monitorData;
+    else if (/^\/api\/auth\/[\w-]+$/.test(url.pathname)) data = { provider: url.pathname.split('/').at(-1), label: '平台', status: 'missing', configured: false, message: '尚未连接。' };
     else if (url.pathname === '/api/sources') data = { keywords: [] };
-    else if (url.pathname === '/api/index-auth') data = { status: 'missing', configured: false, message: '尚未连接抖音指数。' };
     else if (url.pathname === '/api/collection/config') {
       data = accounts.find(value => value.id === account);
       if (method === 'PUT') data.config = { ...data.config, index: JSON.parse(init.body) };
@@ -83,62 +85,51 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
   });
   const field = label => visible(`[aria-label="${label}"]`)[0];
   const count = path => requests.filter(request => request.url.pathname === path && request.method === 'GET').length;
-  const switchAccount = async id => act(async () => {
-    const select = window.document.querySelector('#account-switch'); select.value = String(id);
-    select.dispatchEvent(new window.Event('change', { bubbles: true }));
-  });
+  const openAccountPanel = async () => act(async () => { window.document.querySelector('button[aria-label="当前运营账号"]').click(); });
+  const switchAccount = async id => {
+    await openAccountPanel();
+    await act(async () => { window.document.querySelector(`button[aria-label="切换到 账号${id}"]`).click(); });
+  };
   try {
     await act(async () => { root.render(createElement(StrictMode, null, createElement(App))); });
-    assert.equal(count('/api/collection'), 0);
+    assert.equal(count('/api/monitor'), 0);
     assert.equal(window.localStorage.getItem('everyone-content-selected-account'), null);
-    assert.equal(button('创建账号').disabled, true);
+    // 账号在下拉面板内创建：首账号创建后自动进入设置页
+    await click('选择账号');
     await edit(field('新账号名称'), '账号1');
-    await click('创建账号');
+    await click('＋ 添加');
     assert.equal(window.localStorage.getItem('everyone-content-selected-account'), '1');
-    await click('＋ 新账号');
+    await openAccountPanel();
     await edit(field('新账号名称'), '账号2');
-    await click('创建账号');
+    await click('＋ 添加');
     await switchAccount(1);
-    await navigate('采集');
-    assert.equal(count('/api/collection'), 1); assert.equal(count('/api/contents'), 0);
+    await navigate('指数采集');
+    assert.equal(count('/api/collection'), 1); assert.equal(count('/api/monitor'), 0);
     assert.equal(timers.size, 1);
-    await navigate('已发布'); assert.equal(timers.size, 0);
-    const contents = count('/api/contents'); assert.equal(contents, 1);
-    await click('下一页 ›'); // 25条、每页20条，翻到第2页
-    assert.match(window.document.body.textContent, /作品 #1022/);
+    await navigate('数据监控'); assert.equal(timers.size, 0);
+    const monitorLoads = count('/api/monitor'); assert.equal(monitorLoads, 1);
     window.scrollTo(0, 420);
     await navigate('设置'); await click('采集设置');
+    assert.match(window.document.body.textContent, /连接平台/);
     const limit = visible('input[type="number"]')[0]; await edit(limit, '3');
     const configLoads = count('/api/collection/config');
     await click('账号画像'); await edit(field('账号画像正文'), '尚未保存的画像');
     await click('采集设置'); assert.equal(visible('input[type="number"]')[0].value, '3');
     assert.equal(count('/api/collection/config'), configLoads);
-    await navigate('已发布'); assert.equal(count('/api/contents'), contents); assert.equal(scroll, 420);
-    assert.match(window.document.body.textContent, /作品 #1022/); // 分页保留
-    await edit(field('已发布作品链接'), 'https://www.douyin.com/video/123');
-    window.scrollTo(0, 260);
-    await navigate('设置'); await click('账号画像'); assert.equal(field('账号画像正文').value, '尚未保存的画像');
-    await click('关键词'); await edit(field('新增关键词'), '新关键词'); await click('添加');
+    await navigate('数据监控'); assert.equal(count('/api/monitor'), monitorLoads); assert.equal(scroll, 420);
+    await navigate('指数采集'); await click('采集设置'); await edit(field('新增关键词'), '新关键词'); await click('添加');
     assert.equal(requests.filter(request => request.method === 'POST' && request.url.pathname === '/api/keywords').length, 1);
     await edit(field('新增排除关键词'), '广告'); await act(async () => { window.document.querySelector('button[aria-label="添加排除关键词"]').click(); }); // 排除词增删即时保存并重新筛选
     assert.deepEqual(accounts[0].config.index.discovery.excludeKeywords, ['广告']);
-    assert.equal(count('/api/contents'), contents); // Hidden views do not fetch until needed.
-    await navigate('已发布'); assert.equal(count('/api/contents'), contents + 1); // POST后缓存失效，重新加载
-    assert.equal(field('已发布作品链接').value, 'https://www.douyin.com/video/123'); assert.equal(scroll, 260);
-    await switchAccount(2);
-    assert.equal(field('已发布作品链接').value, '');
-    assert.match(window.document.body.textContent, /作品 #2001/); // 新账号从第1页展示自己的登记
-    assert.equal(requests.filter(request => request.url.pathname === '/api/contents').at(-1).account, 2);
-    await switchAccount(1); assert.equal(field('已发布作品链接').value, '');
-    assert.equal(timers.size, 0);
-    await navigate('采集'); assert.equal(timers.size, 1);
+    assert.equal(count('/api/monitor'), monitorLoads); // Hidden views do not fetch until needed.
+    await navigate('指数采集'); assert.equal(timers.size, 1);
     const collectionLoads = count('/api/collection');
-    await navigate('已发布'); await navigate('采集'); assert.equal(count('/api/collection'), collectionLoads);
     runs.push({ id: 1, provider: 'index', operation: 'videos', target: '1', status: 'ok', observed_at: '2026-11-09 04:00:00', version: null, error: null });
     await act(async () => { [...timers.values()][0](); });
     assert.equal(count('/api/collection'), collectionLoads + 1); // 轮询发现新记录后重新加载
-    await navigate('设置'); await click('采集设置');
-    const rules = visible('section').find(s => [...s.querySelectorAll('h3')].some(h => h.textContent.startsWith('筛选参数'))); // 采集设置区各部分合用一个面板，须按标签定位输入框
+    await navigate('数据监控'); assert.equal(count('/api/monitor'), monitorLoads + 1); // 采集记录变化使监控重新加载
+    await navigate('指数采集'); // 视图仍是采集设置
+    const rules = visible('section').find(s => [...s.querySelectorAll('h2')].some(h => h.textContent.startsWith('筛选参数'))); // 采集设置视图含关键词与筛选参数两块，须按标签定位输入框
     await edit([...rules.querySelectorAll('label')].find(l => l.textContent.startsWith('话题指数下限')).querySelector('input'), '3');
     const saveRules = button('保存并重新筛选');
     assert.equal(saveRules.disabled, false);
@@ -147,6 +138,11 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     assert.equal(accounts[0].config.index.discovery.minTopicIndex, 3);
     assert.equal(accounts[0].config.index.discovery.minVideoLikes, 500);
     assert.equal(button('保存并重新筛选').disabled, true);
+    await navigate('数据监控');
+    await switchAccount(2); // 账号隔离：新账号的监控页只加载自己的快照
+    assert.equal(requests.filter(request => request.url.pathname === '/api/monitor').at(-1).account, 2);
+    await switchAccount(1);
+    assert.equal(timers.size, 0);
   } finally {
     await act(async () => { root.unmount(); });
     for (const [key, descriptor] of originals) {

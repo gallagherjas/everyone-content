@@ -27,7 +27,8 @@ import {
   DATA,
 } from '../lib/strategies.ts';
 import { initializationOverview } from '../lib/initialization.ts';
-import { indexLogin } from '../lib/index-login.ts';
+import { platformLogin, LOGIN_PLATFORMS } from '../lib/platform-login.ts';
+import { monitorOverview } from '../lib/monitor.ts';
 import { CollectionStore, PROVIDERS, atomic } from '../collector/core/store.ts';
 import { collectionStatus } from '../collector/core/status.ts';
 import { planCollection } from '../collector/core/planner.ts';
@@ -54,15 +55,6 @@ async function body(req: IncomingMessage): Promise<Record<string, any>> {
     throw new InputError('请求须为 JSON 对象');
   }
 }
-const visibleMetrics = (raw: string) => {
-  const m = JSON.parse(raw);
-  if (m.views === 0) m.views = null;
-  return m;
-};
-const engagement = (metrics: Record<string, number>) =>
-  ['likes', 'comments', 'shares', 'collects'].reduce((n, k) => n + Number(metrics[k] || 0), 0);
-const latest = `(SELECT metrics FROM snapshots s WHERE s.work_id=w.id AND s.ts<=datetime('now') ORDER BY ts DESC LIMIT 1)`;
-const prev = `(SELECT metrics FROM snapshots s WHERE s.work_id=w.id AND s.ts<=datetime('now') ORDER BY ts DESC LIMIT 1 OFFSET 1)`;
 function page(url: URL) {
   return Math.max(1, Math.floor(Number(url.searchParams.get('page')) || 1));
 }
@@ -82,12 +74,6 @@ function profile(value: unknown) {
   }
   if (u.protocol !== 'https:' || !/(^|\.)douyin\.com$/.test(u.hostname))
     throw new InputError('请使用 HTTPS 抖音链接');
-  return v;
-}
-function videoUrl(value: unknown) {
-  const v = profile(value);
-  if (!/^https:\/\/(?:www\.)?douyin\.com\/video\/\d+/.test(v))
-    throw new InputError('请填写完整作品链接：https://www.douyin.com/video/作品ID');
   return v;
 }
 function scopedId(req: IncomingMessage) {
@@ -196,10 +182,14 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
     a = account(db, id);
   if (path === '/api/context' && method === 'GET')
     return json(res, context(db, id, url.searchParams.get('strategy_sha')));
-  if (method !== 'GET' && path !== '/api/index-auth/cancel' && !/^\/api\/accounts\/\d+$/.test(path)) activeAccount(db, id);
-  if (path === '/api/index-auth' && method === 'GET') return json(res, indexLogin.state(db, id));
-  if (path === '/api/index-auth/start' && method === 'POST') return json(res, indexLogin.start(db, id), 202);
-  if (path === '/api/index-auth/cancel' && method === 'POST') return json(res, await indexLogin.cancel(db, id));
+  if (method !== 'GET' && !/^\/api\/(auth\/[\w-]+\/cancel|accounts\/\d+)$/.test(path)) activeAccount(db, id);
+  const auth = path.match(/^\/api\/auth\/([\w-]+)(\/(start|cancel))?$/);
+  if (auth && LOGIN_PLATFORMS[auth[1]]) {
+    const provider = auth[1];
+    if (auth[3] === 'start' && method === 'POST') return json(res, platformLogin.start(db, id, provider), 202);
+    if (auth[3] === 'cancel' && method === 'POST') return json(res, await platformLogin.cancel(db, id, provider));
+    if (!auth[3] && method === 'GET') return json(res, platformLogin.state(db, id, provider));
+  }
   const acct = path.match(/^\/api\/accounts\/(\d+)$/);
   if (acct && method === 'PUT') {
     if (Number(acct[1]) !== id) throw new InputError('账号上下文不一致', 409);
@@ -216,7 +206,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
       JSON.stringify(config),
       id,
     );
-    if (status === 'archived') await indexLogin.cancel(db, id);
+    if (status === 'archived') for (const provider of Object.keys(LOGIN_PLATFORMS)) await platformLogin.cancel(db, id, provider);
     return json(res, account(db, id));
   }
   if (path === '/api/collection/config') {
@@ -374,29 +364,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
     const b = await body(req);
     return json(res, rollback(db, id, b.sha, b.base_sha));
   }
-  if (path === '/api/contents' && method === 'GET')
-    return json(
-      res,
-      db
-        .prepare(
-          `SELECT c.id,c.status,c.published_url,c.published_at,c.strategy_sha,(SELECT metrics FROM content_snapshots s WHERE s.content_id=c.id ORDER BY ts DESC LIMIT 1) metrics FROM contents c WHERE c.account_id=? AND c.status='published' ORDER BY c.created_at DESC`,
-        )
-        .all(id),
-    );
-  if (path === '/api/contents' && method === 'POST') {
-    const b = await body(req),
-      url = videoUrl(b.published_url),
-      date = new Date(b.published_at);
-    if (!Number.isFinite(date.getTime()) || date.getTime() > Date.now())
-      throw new InputError('请填写正确的实际发布时间');
-    const next = Number(db.prepare('SELECT COALESCE(MAX(id),0)+1 id FROM contents').get()?.id);
-    const result = db
-      .prepare(
-        "INSERT INTO contents(id,account_id,status,published_url,published_at,strategy_sha) VALUES(?,?,'published',?,?,NULL)",
-      )
-      .run(next, id, url, date.toISOString().replace('T', ' ').slice(0, 19));
-    return json(res, { id: Number(result.lastInsertRowid) }, 201);
-  }
+  if (path === '/api/monitor' && method === 'GET') return json(res, monitorOverview(db, id));
   if (path === '/api/run/collect' && method === 'POST') {
     const b = await body(req),
       extra: string[] = [];

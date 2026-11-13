@@ -51,8 +51,8 @@ export default function CollectionRules({ account, onSaved }: { account: Account
     } catch (error) { setFailed(true); setMessage(String(error)); }
     finally { setBusy(false); }
   };
-  return <div className="space-y-5 border-t border-line pt-6">
-    <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold text-lg">筛选参数<span className="group relative ml-1.5 inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full border border-line align-middle text-[10px] leading-none font-normal text-muted">?<span className="pointer-events-none absolute left-1/2 top-full z-50 mt-1.5 -translate-x-1/2 rounded-lg border border-line bg-card px-2.5 py-1 text-xs whitespace-nowrap text-muted opacity-0 shadow-lg transition group-hover:opacity-100">请在顶部导航处查看采集规则。</span></span></h3><span className="text-xs text-muted">{account.name} · {saved === null ? '正在加载规则' : dirty ? '有未保存修改' : saved.discovery === null ? '默认规则待保存' : '已保存'}</span></div>
+  return <section className="panel space-y-5">
+    <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-xl font-semibold">筛选参数<span className="group relative ml-1.5 inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full border border-line align-middle text-[10px] leading-none font-normal text-muted">?<span className="pointer-events-none absolute left-1/2 top-full z-50 mt-1.5 -translate-x-1/2 rounded-lg border border-line bg-card px-2.5 py-1 text-xs whitespace-nowrap text-muted opacity-0 shadow-lg transition group-hover:opacity-100">请在顶部导航处查看采集规则。</span></span></h2><span className="text-xs text-muted">{account.name} · {saved === null ? '正在加载规则' : dirty ? '有未保存修改' : saved.discovery === null ? '默认规则待保存' : '已保存'}</span></div>
     <form onSubmit={save}>
       <fieldset disabled={disabled} className="space-y-6">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{limits.map(([key, label, fallback, min, max]) => <label className="block text-sm" key={key}>{label}<input className="field" type="number" required step="1" min={min} max={max} value={String(policy[key] ?? fallback)} onChange={event => change(key, event.target.value)} /></label>)}</div>
@@ -60,5 +60,5 @@ export default function CollectionRules({ account, onSaved }: { account: Account
       </fieldset>
     </form>
     {message && <Msg tone={failed ? 'error' : 'ok'}>{message}</Msg>}
-  </div>;
+  </section>;
 }

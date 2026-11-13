@@ -1,5 +1,6 @@
 import { ReadClient,loadAuth } from '../sources/douyin-index/client.ts';
 import { requestFor,semanticHash } from '../sources/douyin-index/protocol.ts';
+import { snapshotExecute } from '../sources/platform/snapshot.ts';
 import { atomic,stamp,taskKey,PROVIDERS, type CollectionStore } from './store.ts';
 import { parseJson } from '../../lib/json.ts';
 
@@ -31,6 +32,7 @@ function transport(store: CollectionStore,run: any,counts: Record<string,number>
   };
 }
 async function execute(store: CollectionStore,run: any,client: any,clock: ()=>number): Promise<any> {
+  if (run.provider !== 'index') return snapshotExecute(store,run,client,clock);
   const spec=JSON.parse(run.request);
   const credential=store.db.prepare('SELECT c.auth_path FROM collection_credentials c JOIN collection_task_accounts a ON a.account_id=c.account_id WHERE a.task_key=? AND c.scope=? LIMIT 1').get(run.task_key,run.scope) as any;
   const lastDates=store.latest(taskKey('index',run.scope,{type:'topic_dates'}));
@@ -95,7 +97,9 @@ export async function runCollection(store: CollectionStore,options: RunOptions={
         });summary.cached++;
         store.release(task,clock()+Math.min(HOUR,task.interval_ms));
       }else{
-        store.finish(run,result.data,result.version,result.fingerprint,()=>{},clock());summary.completed++;
+        // 指数的事实由 rebuildAccount 在读取侧落库;创作后台快照在此直接写观测。
+        const project = task.provider==='index' ? ()=>{} : (finished: any,data: any)=>store.observation(finished,'account',data.uid,'account',data.metrics);
+        store.finish(run,result.data,result.version,result.fingerprint,project,clock());summary.completed++;
         let interval=task.interval_ms;
         if(task.provider==='index'&&task.operation.endsWith('_dates')){
           const effective=result.data.valid_day??result.data.datetime;

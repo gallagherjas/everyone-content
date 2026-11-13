@@ -19,10 +19,10 @@ export default function RulesMenu() {
   useEffect(() => () => window.clearTimeout(closeTimer.current), []);
   return <div className="shrink-0" onMouseEnter={enter} onMouseLeave={leave}>
     <button type="button" ref={btnRef} aria-expanded={open} onFocus={enter} onBlur={leave}
-      className="shrink-0 whitespace-nowrap rounded-full px-4 py-1.5 text-sm text-amber-500 underline decoration-amber-500/50 underline-offset-4 transition hover:text-warn">采集规则</button>
+      className="shrink-0 whitespace-nowrap rounded-full px-4 py-1.5 text-sm text-brand underline decoration-brand/50 underline-offset-4 transition hover:text-brand-deep">指数采集规则</button>
     {open && pos && createPortal(
       <div className="fixed z-50 w-96 rounded-xl border border-line bg-card p-4 shadow-lg" style={{ top: pos.top, right: pos.right }} onMouseEnter={enter} onMouseLeave={leave}>
-        <p className="text-xs leading-6 text-warn">tips：了解规则前请先打开抖音指数了解其基本知识。</p>
+        <p className="text-xs leading-6 text-brand">tips：了解规则前请先打开抖音指数了解其基本知识。</p>
         <p className="text-sm font-medium">采集按 关键词 → 话题 → 视频 → 达人 逐级发现：</p>
         <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-xs leading-6 text-muted">
           <li>每个关键词进行话题搜索：近30天指数低于「话题指数下限（30天）」的话题淘汰，其余按指数从高到低，最多保留「话题保留数」个。</li>

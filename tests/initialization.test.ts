@@ -72,7 +72,7 @@ test('初始化接受有效的旧版关键词和已保存的默认规则，暂�
     saveDraft(db, id, { 'account-profile.md': COMPLETE_PROFILE }, sha);
     publish(db, id, sha, '确认画像');
     const setup = () => initializationOverview(db).accounts[0].setup;
-    db.prepare('INSERT INTO collection_credentials VALUES(?,?,?)').run(id, 'private-auth.json', `account:${id}`);
+    db.prepare('INSERT INTO collection_credentials VALUES(?,?,?,?)').run(id, 'index', 'private-auth.json', `account:${id}`);
     db.prepare("INSERT INTO account_sources(account_id,kind,source_key,name,status) VALUES(?,'keyword','停用词','停用词','paused')").run(id);
     assert.deepEqual(setup().missing, ['keywords', 'collection_config']);
     const legacy = validateConfig({ ...config, index: { discovery: {}, tasks: [{ type: 'videos', keyword: '园艺', days: 7 }] } });

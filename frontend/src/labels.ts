@@ -1,5 +1,5 @@
 /** 采集域共用文案：采集页(任务/次数上限)与设置·采集记录共用 */
-export const names: Record<string, string> = { index: "抖音指数" };
+export const names: Record<string, string> = { index: "抖音指数", douyin: "抖音创作后台", xhs: "小红书创作服务", bili: "B站创作中心" };
 export const statuses: Record<string, string> = { ok: "完成", failed: "失败", cached: "复用缓存", running: "处理中", deferred: "等待次数恢复" };
 const errors: Record<string, string> = {
   auth_required: "本账号尚未登记指数授权", login_required: "登录已失效，请更新授权", invalid_auth_cookie: "指数授权内容无效",
