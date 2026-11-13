@@ -59,6 +59,8 @@ export default function BloggersPage() {
   };
   const bloggers = rows.filter(r => r.kind === "blogger"), pending = rows.filter(r => r.kind === "blogger_search");
   const current = bloggers.find(b => String(b.id) === active);
+  // 进入页面默认选中第一个博主。
+  useEffect(() => { if (!active && bloggers.length) setActive(String(bloggers[0].id)); }, [active, bloggers]);
 
   return <Page head="博主" active={active} onPick={setActive} items={[
     ...bloggers.map(b => ({ key: String(b.id), label: b.name })),

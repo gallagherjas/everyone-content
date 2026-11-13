@@ -1,7 +1,7 @@
 // 策略正文以 Git 对象为准，SQLite 只保存生效指针和审计记录；不改用户分支或暂存区。
 import type { DatabaseSync } from 'node:sqlite';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { account, InputError } from './accounts.ts';
@@ -206,6 +206,12 @@ export function rollback(db: DatabaseSync, id: number, sha: unknown, base: unkno
     if (n === 'account-profile.md') atomic(join(draftDir(id), n), value);
   atomic(join(draftDir(id), 'base.txt'), restored);
   return strategy(db, id);
+}
+/** 删除账号时清理画像 Git 引用与授权/草稿/语料目录(尽力而为)；数据库行由调用方在事务中删除。 */
+export function dropProfile(id: number) {
+  try { git(['update-ref', '-d', ref(id)]); } catch { /* 引用可能尚不存在 */ }
+  for (const dir of [join(DATA, 'authorization', String(id)), join(DATA, 'drafts', String(id)), join(DATA, 'writing', String(id))])
+    rmSync(dir, { recursive: true, force: true });
 }
 export function context(db: DatabaseSync, id: number, sha?: string | null) {
   const a = account(db, id);

@@ -87,23 +87,20 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
   });
   const field = label => visible(`[aria-label="${label}"]`)[0];
   const count = path => requests.filter(request => request.url.pathname === path && request.method === 'GET').length;
-  const openAccountPanel = async () => act(async () => { window.document.querySelector('button[aria-label="当前运营账号"]').click(); });
   const switchAccount = async id => {
-    await openAccountPanel();
+    await navigate('帐号');
     await act(async () => { window.document.querySelector(`button[aria-label="切换到 账号${id}"]`).click(); });
   };
   try {
     await act(async () => { root.render(createElement(StrictMode, null, createElement(App))); });
     assert.equal(count('/api/monitor'), 0);
     assert.equal(window.localStorage.getItem('everyone-content-selected-account'), null);
-    // 账号在下拉面板内创建：首账号创建后自动进入设置页
-    await click('选择账号');
+    // 无账号时中央引导面板创建首账号，创建后自动进入帐号页
     await edit(field('新账号名称'), '账号1');
-    await click('＋ 添加');
+    await click('新建账号');
     assert.equal(window.localStorage.getItem('everyone-content-selected-account'), '1');
-    await openAccountPanel();
     await edit(field('新账号名称'), '账号2');
-    await click('＋ 添加');
+    await click('新建账号');
     await switchAccount(1);
     await navigate('指数');
     assert.equal(count('/api/collection'), 1); assert.equal(count('/api/monitor'), 0);
@@ -115,7 +112,7 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     assert.match(window.document.body.textContent, /连接平台/);
     const limit = visible('input[type="number"]')[0]; await edit(limit, '3');
     const configLoads = count('/api/collection/config');
-    await navigate('设置'); await click('账号画像'); await edit(field('账号画像正文'), '尚未保存的画像');
+    await navigate('帐号'); await click('账号画像'); await edit(field('账号画像正文'), '尚未保存的画像');
     await navigate('采集'); await click('授权与定时'); assert.equal(visible('input[type="number"]')[0].value, '3');
     assert.equal(count('/api/collection/config'), configLoads);
     await navigate('数据监控'); assert.equal(count('/api/monitor'), monitorLoads); assert.equal(scroll, 420);
@@ -130,8 +127,8 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     await act(async () => { [...timers.values()][0](); });
     assert.equal(count('/api/collection'), collectionLoads + 1); // 轮询发现新记录后重新加载
     await navigate('数据监控'); assert.equal(count('/api/monitor'), monitorLoads + 1); // 采集记录变化使监控重新加载
+    await switchAccount(2); // 帐号页切换后，监控只加载新账号自己的快照
     await navigate('数据监控');
-    await switchAccount(2); // 账号隔离：新账号的监控页只加载自己的快照
     assert.equal(requests.filter(request => request.url.pathname === '/api/monitor').at(-1).account, 2);
     await switchAccount(1);
     assert.equal(timers.size, 0);

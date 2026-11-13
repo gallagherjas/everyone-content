@@ -23,6 +23,7 @@ import {
   publish,
   rollback,
   context,
+  dropProfile,
   ROOT,
   DATA,
 } from '../lib/strategies.ts';
@@ -209,6 +210,20 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
     );
     if (status === 'archived') for (const provider of Object.keys(LOGIN_PLATFORMS)) await platformLogin.cancel(db, id, provider);
     return json(res, account(db, id));
+  }
+  if (acct && method === 'DELETE') {
+    if (Number(acct[1]) !== id) throw new InputError('账号上下文不一致', 409);
+    // 依赖顺序:快照先于作品、定时记录先于任务进程,全部子行删除后再删账号本体;采集任务队列保留为全局历史。
+    atomic(db, () => {
+      db.prepare('DELETE FROM content_snapshots WHERE content_id IN (SELECT id FROM contents WHERE account_id=?)').run(id);
+      db.prepare('DELETE FROM collection_schedule_runs WHERE account_id=?').run(id);
+      for (const table of ['contents', 'task_runs', 'account_sources', 'account_works', 'account_initialization',
+        'strategy_audit', 'collection_run_accounts', 'collection_task_accounts', 'collection_credentials'])
+        db.prepare(`DELETE FROM ${table} WHERE account_id=?`).run(id);
+      db.prepare('DELETE FROM accounts WHERE id=?').run(id);
+    });
+    dropProfile(id);
+    return json(res, { ok: true });
   }
   if (path === '/api/collection/config') {
     if (method === 'GET') return json(res, a);

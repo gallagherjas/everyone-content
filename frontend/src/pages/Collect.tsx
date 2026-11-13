@@ -99,6 +99,17 @@ export default function CollectPage({ current, onUpdate }: { current: Account; o
         <div className="mt-4 flex flex-wrap gap-2">
           {(state?.budgets ?? []).map(b => <BudgetCard key={b.provider} label={names[b.provider] ?? b.provider} used={b.used} limit={b.daily_limit} connected={!!state?.credentials?.[b.provider]} />)}
         </div>
+        <div className="mt-5 rounded-xl border border-line bg-canvas px-4 py-3">
+          <p className="text-xs leading-6 text-brand">tips：了解规则前请先打开抖音指数了解其基本知识。</p>
+          <p className="mt-1 text-sm font-medium">采集按 关键词 → 话题 → 视频 → 达人 逐级发现：</p>
+          <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-xs leading-6 text-muted">
+            <li>每个关键词搜索全部命中话题，以及近7天与近30天两个窗口的视频；不做数量与指数门槛限制。</li>
+            <li>排除关键词全程生效：话题名称、视频标题或标签、达人昵称命中任一词即排除。</li>
+            <li>页面按指数排名展示榜单：话题 Top20、视频 Top200（可切近7天/近30天口径与类型）、达人 Top10。</li>
+            <li>博主走达友域单独采集：添加时搜索定位，此后每天一次作品榜，日增曲线与资料页按开关追加。</li>
+          </ol>
+          <p className="mt-2 text-xs leading-6 text-muted">调整采集词与排除词即时生效，现有数据立即按新规则重新整理，无需重新采集。</p>
+        </div>
       </section></KeepAlive>
 
       <KeepAlive active={section === "keywords"}><section className="panel space-y-5">
