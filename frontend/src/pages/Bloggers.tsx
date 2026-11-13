@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi, fmtNum, fmtTime, relTime } from "../api";
 import { Page } from "../components/Layout";
-import { Msg } from "../components/Common";
+import { Badge, Msg, VIDEO_BADGES } from "../components/Common";
 import { useCachedLoad } from "../components/PageCache";
 
 interface BloggerRow {
@@ -9,7 +9,7 @@ interface BloggerRow {
   profile?: { secUid: string | null; fans: number | null; likes: number | null; items: number | null; tag1: string | null; tag2: string | null; avatar: string | null; intro?: string };
   options?: { core?: boolean; info?: boolean }; worksCount?: number; lastCollectAt?: string | null;
 }
-interface WorkRow { id: string; title: string; likes: number | null; comments: number | null; shares: number | null; follows: number | null; publishedAt: string | null; url: string }
+interface WorkRow { id: string; title: string; likes: number | null; comments: number | null; shares: number | null; follows: number | null; publishedAt: string | null; url: string; badges?: string[] }
 interface Trend { fans: { date: string; count: number | null }[]; likes: { date: string; count: number | null }[]; summary: { newFansDay: number | null; newFansWeek: number | null } }
 interface Detail extends BloggerRow { works: WorkRow[]; trend: Trend | null }
 
@@ -101,7 +101,10 @@ export default function BloggersPage() {
             {!detail.works.length && <p className="mt-4 text-sm text-muted">近30天暂无上榜作品；数据随每轮采集更新。</p>}
             <div className="mt-4 space-y-2">
               {detail.works.map(w => <div key={w.id} className="rounded-lg border border-line/70 bg-canvas/50 px-3 py-2.5">
-                <a className="link block truncate text-sm" href={w.url} target="_blank" rel="noreferrer">{w.title || w.id}</a>
+                <div className="flex items-center gap-2">
+                  <a className="link min-w-0 flex-1 truncate text-sm" href={w.url} target="_blank" rel="noreferrer">{w.title || w.id}</a>
+                  {!!w.badges?.length && <span className="flex shrink-0 gap-1">{w.badges.map(b => <Badge key={b} tone={VIDEO_BADGES[b]?.tone ?? "gray"}>{VIDEO_BADGES[b]?.label ?? b}</Badge>)}</span>}
+                </div>
                 <p className="mt-1.5 flex flex-wrap items-center justify-between gap-2 text-xs leading-6 text-muted">
                   <span className="shrink-0">{w.publishedAt ? `${w.publishedAt.endsWith("+08:00") ? fmtTime(w.publishedAt).slice(0, 10) : fmtTime(w.publishedAt)} 发布` : "发布时间未知"}</span>
                   <span className="flex shrink-0 items-baseline gap-3 tabular-nums">

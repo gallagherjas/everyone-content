@@ -28,6 +28,14 @@ const BADGE_TONES = {
 };
 export type BadgeTone = keyof typeof BADGE_TONES;
 
+/** 视频官方标记的唯一口径：指数榜与博主作品共用同一份标签色与文案 */
+export const VIDEO_BADGES: Record<string, { label: string; tone: BadgeTone }> = {
+  lowFansHot: { label: "低粉爆款", tone: "blue" },
+  highFansRise: { label: "高涨粉", tone: "brand" },
+  highLikeRate: { label: "高点赞率", tone: "rose" },
+  highPlayOver: { label: "高完播率", tone: "violet" },
+};
+
 export function Badge({ tone = "gray", children }: { tone?: BadgeTone; children: ReactNode }) {
   return <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs leading-4 ${BADGE_TONES[tone]}`}>{children}</span>;
 }

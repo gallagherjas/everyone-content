@@ -103,16 +103,23 @@ export function bloggerDetail(store: CollectionStore, accountId: number, row: an
     tag1: info.data.first_tag_name ?? null, tag2: info.data.second_tag_name ?? null, intro: String(info.data.user_introduction ?? ''), lastInfoAt: info.run.observed_at });
   const works = latestRun(store, scope, 'author_works', row.source_key);
   const core = latestRun(store, scope, 'author_core', row.source_key);
-  // 榜单发布时间只有日期精度；同一作品若被关键词采集过，作品表里存有精确时间点，合并展示。
-  const precise = profile.secUid
-    ? new Map((db.prepare(`SELECT url,published_at FROM works WHERE platform='douyin' AND author_id=? AND published_at IS NOT NULL`).all(profile.secUid) as any[])
-      .filter(r => !String(r.published_at).endsWith('16:00:00'))
-      .map(r => [r.url.split('/').pop()!, `${String(r.published_at).replace(' ', 'T')}Z`]))
-    : new Map();
+  // 跨域共享：同一作品若被关键词采集过，合并精确发布时间与官方标记(低粉爆款等)。
+  const shared = profile.secUid
+    ? (db.prepare(`SELECT w.id wid,w.url,w.published_at,
+        (SELECT metrics FROM collection_observations o WHERE o.kind='work' AND o.object_id=w.id AND o.dimension='videos' ORDER BY o.run_id DESC LIMIT 1) metrics
+        FROM works w WHERE w.platform='douyin' AND w.author_id=?`).all(profile.secUid) as any[])
+      .reduce((acc: Map<string, { publishedAt?: string; badges?: string[] }>, r) => {
+        let badges: string[] | undefined, publishedAt: string | undefined;
+        try { badges = JSON.parse(r.metrics ?? '{}').badges; } catch { /* 观测缺失时无标记 */ }
+        if (r.published_at && !String(r.published_at).endsWith('16:00:00')) publishedAt = `${String(r.published_at).replace(' ', 'T')}Z`;
+        acc.set(r.url.split('/').pop()!, { publishedAt, badges });
+        return acc;
+      }, new Map())
+    : new Map<string, { publishedAt?: string; badges?: string[] }>();
   return { id: row.id, userId: row.source_key, name: row.name, status: row.status, profile,
     options: (() => { try { return JSON.parse(row.options || '{}'); } catch { return {}; } })(),
     works: works ? worksFromCapture(works.data).sort((a, b) => (b.likes ?? 0) - (a.likes ?? 0))
-      .map(w => ({ ...w, publishedAt: precise.get(w.id) ?? w.publishedAt })) : [],
+      .map(w => ({ ...w, publishedAt: shared.get(w.id)?.publishedAt ?? w.publishedAt, badges: shared.get(w.id)?.badges ?? [] })) : [],
     trend: core ? { fans: (core.data.fanslistday ?? []).map((r: any) => ({ date: r.date, count: count(r.count) })),
       likes: (core.data.likelistday ?? []).map((r: any) => ({ date: r.date, count: count(r.count) })),
       summary: { newFansDay: count(core.data.fans_info?.new_fans_count_by_day), newFansWeek: count(core.data.fans_info?.new_fans_count_by_week) } } : null,
