@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi, fmtNum, fmtTime, relTime } from "../api";
 import { Page } from "../components/Layout";
-import { ConfirmBtn, Msg, Toggle } from "../components/Common";
+import { Msg } from "../components/Common";
 import { useCachedLoad } from "../components/PageCache";
 
 interface BloggerRow {
@@ -34,7 +34,7 @@ export default function BloggersPage() {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [active, setActive] = useState<string>("");
 
-  const [busy, setBusy] = useState(false), [failed, setFailed] = useState(false), [message, setMessage] = useState("");
+  const [failed, setFailed] = useState(false), [message, setMessage] = useState("");
   const load = useCallback(() => api<BloggerRow[]>("/api/bloggers").then(setRows).catch(() => setRows([])), [api]);
   useCachedLoad('bloggers', load);
   const loadDetail = useCallback((id: number) => api<Detail>(`/api/bloggers/${id}`).then(setDetail).catch(e => { setDetail(null); setFailed(true); setMessage(String(e)); }), [api]);
@@ -53,10 +53,6 @@ export default function BloggersPage() {
       api("/api/run/collect", { method: "POST", body: JSON.stringify({}) }).catch(() => {});
     }
   }, [rows, api]);
-  const act = async (fn: () => Promise<unknown>, text: string) => {
-    if (busy) return; setBusy(true); setFailed(false); setMessage("");
-    try { await fn(); setMessage(text); } catch (e) { setFailed(true); setMessage(String(e)); } finally { setBusy(false); }
-  };
   const bloggers = rows.filter(r => r.kind === "blogger"), pending = rows.filter(r => r.kind === "blogger_search");
   const current = bloggers.find(b => String(b.id) === active);
   // 进入页面默认选中第一个博主。
@@ -87,18 +83,8 @@ export default function BloggersPage() {
                   {detail.profile?.tag1 && <span className="rounded-full bg-brand/10 px-2 py-0.5 text-xs text-brand">{[detail.profile.tag1, detail.profile.tag2].filter(Boolean).join(" / ")}</span>}
                 </p>
                 {detail.profile?.intro && <p className="mt-2 max-w-2xl whitespace-pre-line text-sm leading-6 text-muted">{detail.profile.intro}</p>}
-                <p className="mt-2 text-xs text-faint">最近采集 {detail.lastCollectAt ? `${fmtTime(detail.lastCollectAt)}（${relTime(detail.lastCollectAt)}）` : "尚未采集"}</p>
+                <p className="mt-2 text-xs text-faint">最近采集 {detail.lastCollectAt ? `${fmtTime(detail.lastCollectAt)}（${relTime(detail.lastCollectAt)}）` : "尚未采集"}；开关与移出在「采集 → 博主」。</p>
               </div>
-              <ConfirmBtn label="移出" confirmLabel="确认移出" disabled={busy}
-                onConfirm={() => void act(async () => { await api(`/api/bloggers/${detail.id}`, { method: "DELETE" }); setActive(""); load(); }, "已移出。")} />
-            </div>
-            <div className="mt-4 flex flex-wrap gap-x-8 gap-y-3 border-t border-line pt-4">
-              <Toggle checked={detail.status === "ready"} disabled={busy} label="追踪中" hint="暂停后不再消耗额度"
-                onChange={v => void act(async () => { await api(`/api/bloggers/${detail.id}`, { method: "PUT", body: JSON.stringify({ status: v ? "ready" : "paused" }) }); loadDetail(detail.id); }, "已更新。")} />
-              <Toggle checked={!!detail.options?.core} disabled={busy} label="日增曲线" hint="+1 次/天，粉丝与点赞每日净增"
-                onChange={v => void act(async () => { await api(`/api/bloggers/${detail.id}`, { method: "PUT", body: JSON.stringify({ core: v }) }); loadDetail(detail.id); }, "已更新，下轮采集生效。")} />
-              <Toggle checked={!!detail.options?.info} disabled={busy} label="资料页" hint="+1 次/天，简介/粉丝数/里程碑"
-                onChange={v => void act(async () => { await api(`/api/bloggers/${detail.id}`, { method: "PUT", body: JSON.stringify({ info: v }) }); loadDetail(detail.id); }, "已更新，下轮采集生效。")} />
             </div>
           </section>
 

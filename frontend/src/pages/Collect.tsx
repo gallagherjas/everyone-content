@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi, fmtTime, type Account } from "../api";
-import { Badge, Msg, type BadgeTone } from "../components/Common";
+import { Badge, ConfirmBtn, Msg, Toggle, type BadgeTone } from "../components/Common";
 import { Page } from "../components/Layout";
 import PlatformAuthorization from "../components/PlatformAuthorization";
 import CollectionSchedule from "../components/CollectionSchedule";
@@ -78,10 +78,11 @@ export default function CollectPage({ current, onUpdate }: { current: Account; o
 
   return <Page head="采集" active={section} onPick={key => { setSection(key); setMessage(""); setRunDetail(null); }} items={[
     { key: "overview", label: "总览" },
+    { key: "auth", label: "授权" },
+    { key: "schedule", label: "定时" },
     { key: "keywords", label: "采集词" },
     { key: "bloggers", label: "博主" },
-    { key: "runs", label: "记录" },
-    { key: "auth", label: "授权与定时" },
+    { key: "logs", label: "日志" },
   ]}>
     <div className="space-y-5">
       <KeepAlive active={section === "overview"}><section className="panel">
@@ -134,7 +135,7 @@ export default function CollectPage({ current, onUpdate }: { current: Account; o
 
       <KeepAlive active={section === "bloggers"}><section className="panel">
         <h2 className="font-semibold text-xl">博主追踪</h2>
-        <p className="mt-2 text-sm text-muted">输入抖音昵称经指数搜索定位后开始追踪；添加消耗 1 次，此后每个博主每天消耗其开启的采集项次数。数据与开关见「博主」页。</p>
+        <p className="mt-2 text-sm text-muted">输入抖音昵称经指数搜索定位后开始追踪；作品榜固定 1 次/天，日增曲线与资料页按开关追加。数据浏览见「博主」页。</p>
         <div className="mt-3 flex gap-2">
           <input className="field min-w-0 flex-1" value={bloggerName} onChange={e => setBloggerName(e.target.value)} placeholder="例如：AI 造物笔记" aria-label="博主昵称" maxLength={80} disabled={archived} />
           <button className="btn-primary shrink-0" disabled={busy || !bloggerName.trim()}
@@ -142,19 +143,30 @@ export default function CollectPage({ current, onUpdate }: { current: Account; o
         </div>
         {pending.length > 0 && <p className="mt-3 text-sm text-muted">待解析：{pending.map(p => `${p.name}${p.status === "paused" ? "（未找到）" : ""}`).join("、")}</p>}
         {!!tracked.length && <div className="mt-4 space-y-2">
-          {tracked.map(b => <div key={b.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line/70 bg-canvas/50 px-3 py-2 text-sm">
-            <span className="font-medium text-ink">{b.name}</span>
-            <span className="flex items-baseline gap-3 text-xs text-muted tabular-nums">
-              <span>{b.status === "ready" ? "追踪中" : "已暂停"}</span>
-              <span>{1 + (b.options?.core ? 1 : 0) + (b.options?.info ? 1 : 0)} 次/天</span>
-              <span>{b.lastCollectAt ? `最近采集 ${fmtTime(b.lastCollectAt)}` : "尚未采集"}</span>
-            </span>
+          {tracked.map(b => <div key={b.id} className="rounded-lg border border-line/70 bg-canvas/50 px-3 py-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm font-medium text-ink">{b.name}</span>
+              <span className="flex items-baseline gap-3 text-xs text-muted tabular-nums">
+                <span>{1 + (b.options?.core ? 1 : 0) + (b.options?.info ? 1 : 0)} 次/天</span>
+                <span>{b.lastCollectAt ? `最近采集 ${fmtTime(b.lastCollectAt)}` : "尚未采集"}</span>
+                <ConfirmBtn label="移出" confirmLabel="确认移出" disabled={busy}
+                  onConfirm={() => void action(async () => { await api(`/api/bloggers/${b.id}`, { method: "DELETE" }); loadBloggers(); }, "已移出。")} />
+              </span>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-x-6 gap-y-2 border-t border-line pt-2.5">
+              <Toggle checked={b.status === "ready"} disabled={busy} label="追踪中" hint="暂停不消耗额度"
+                onChange={v => void action(async () => { await api(`/api/bloggers/${b.id}`, { method: "PUT", body: JSON.stringify({ status: v ? "ready" : "paused" }) }); loadBloggers(); }, "已更新。")} />
+              <Toggle checked={!!b.options?.core} disabled={busy} label="日增曲线" hint="+1 次/天"
+                onChange={v => void action(async () => { await api(`/api/bloggers/${b.id}`, { method: "PUT", body: JSON.stringify({ core: v }) }); loadBloggers(); }, "已更新，下轮采集生效。")} />
+              <Toggle checked={!!b.options?.info} disabled={busy} label="资料页" hint="+1 次/天"
+                onChange={v => void action(async () => { await api(`/api/bloggers/${b.id}`, { method: "PUT", body: JSON.stringify({ info: v }) }); loadBloggers(); }, "已更新，下轮采集生效。")} />
+            </div>
           </div>)}
         </div>}
       </section></KeepAlive>
 
-      <KeepAlive active={section === "runs"}><section className="panel">
-        <h2 className="font-semibold text-xl">采集记录</h2>
+      <KeepAlive active={section === "logs"}><section className="panel">
+        <h2 className="font-semibold text-xl">采集日志</h2>
         <p className="mt-2 text-sm text-muted">时间均为北京时间。“查看记录”展示本次采集的入库数据。</p>
         <div className="mt-4 space-y-2">{runPage.slice.map(r => <div key={r.id} className="rounded-lg border border-line/70 bg-canvas/50 px-3 py-2 text-sm">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -178,8 +190,11 @@ export default function CollectPage({ current, onUpdate }: { current: Account; o
       </section></KeepAlive>
 
       <KeepAlive active={section === "auth"}><section className="panel space-y-6">
-        <h2 className="font-semibold text-xl">授权与定时</h2>
+        <h2 className="font-semibold text-xl">平台授权</h2>
         <PlatformAuthorization disabled={archived} />
+      </section></KeepAlive>
+      <KeepAlive active={section === "schedule"}><section className="panel space-y-6">
+        <h2 className="font-semibold text-xl">定时采集</h2>
         <CollectionSchedule account={current} onSaved={onUpdate} />
       </section></KeepAlive>
 

@@ -7,7 +7,7 @@ import CollectionPage from "./pages/Collection";
 import SettingsPage from "./pages/Settings";
 import MonitorPage from "./pages/Monitor";
 import { KeepAlive, PageCacheProvider } from "./components/PageCache";
-const TABS = [["monitor", "数据监控"], ["collection", "指数"], ["bloggers", "博主"], ["collect", "采集"], ["settings", "帐号"]];
+const TABS = [["monitor", "数据"], ["collection", "指数"], ["bloggers", "博主"], ["collect", "采集"], ["settings", "帐号"]];
 const ACCOUNT_KEY = "everyone-content-selected-account";
 
 export default function App() {

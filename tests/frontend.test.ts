@@ -105,17 +105,17 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     await navigate('指数');
     assert.equal(count('/api/collection'), 1); assert.equal(count('/api/monitor'), 0);
     assert.equal(timers.size, 1);
-    await navigate('数据监控'); assert.equal(timers.size, 0);
+    await navigate('数据'); assert.equal(timers.size, 0);
     const monitorLoads = count('/api/monitor'); assert.equal(monitorLoads, 1);
     window.scrollTo(0, 420);
-    await navigate('采集'); await click('授权与定时');
+    await navigate('采集'); await click('定时');
     assert.match(window.document.body.textContent, /连接平台/);
     const limit = visible('input[type="number"]')[0]; await edit(limit, '3');
     const configLoads = count('/api/collection/config');
     await navigate('帐号'); await click('账号画像'); await edit(field('账号画像正文'), '尚未保存的画像');
-    await navigate('采集'); await click('授权与定时'); assert.equal(visible('input[type="number"]')[0].value, '3');
+    await navigate('采集'); await click('定时'); assert.equal(visible('input[type="number"]')[0].value, '3');
     assert.equal(count('/api/collection/config'), configLoads);
-    await navigate('数据监控'); assert.equal(count('/api/monitor'), monitorLoads); assert.equal(scroll, 420);
+    await navigate('数据'); assert.equal(count('/api/monitor'), monitorLoads); assert.equal(scroll, 420);
     await navigate('采集'); await click('采集词'); await edit(field('新增关键词'), '新关键词'); await click('添加');
     assert.equal(requests.filter(request => request.method === 'POST' && request.url.pathname === '/api/keywords').length, 1);
     await edit(field('新增排除关键词'), '广告'); await act(async () => { window.document.querySelector('button[aria-label="添加排除关键词"]').click(); }); // 排除词增删即时保存并重新筛选
@@ -126,9 +126,9 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     runs.push({ id: 1, provider: 'index', operation: 'videos', target: '1', status: 'ok', observed_at: '2026-11-09 04:00:00', version: null, error: null });
     await act(async () => { [...timers.values()][0](); });
     assert.equal(count('/api/collection'), collectionLoads + 1); // 轮询发现新记录后重新加载
-    await navigate('数据监控'); assert.equal(count('/api/monitor'), monitorLoads + 1); // 采集记录变化使监控重新加载
+    await navigate('数据'); assert.equal(count('/api/monitor'), monitorLoads + 1); // 采集记录变化使监控重新加载
     await switchAccount(2); // 帐号页切换后，监控只加载新账号自己的快照
-    await navigate('数据监控');
+    await navigate('数据');
     assert.equal(requests.filter(request => request.url.pathname === '/api/monitor').at(-1).account, 2);
     await switchAccount(1);
     assert.equal(timers.size, 0);
