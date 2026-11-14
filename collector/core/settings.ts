@@ -23,7 +23,8 @@ export function registerAuth(store: CollectionStore,accountId: number,path: stri
     store.db.prepare(`INSERT INTO collection_credentials VALUES(?,?,?,?) ON CONFLICT(account_id,provider) DO UPDATE SET auth_path=excluded.auth_path,scope=excluded.scope`)
       .run(accountId,provider,file,`account:${accountId}`);
     store.db.prepare('UPDATE collection_provider_state SET paused=0,error=NULL WHERE provider=? AND scope=?').run(provider,`account:${accountId}`);
-    store.db.prepare(`UPDATE collection_tasks SET next_run_at=0,error=NULL WHERE provider=? AND scope=? AND disabled=0
+    // 重新连接即要求重试:解除该来源任务的停用并清零连续失败计数。
+    store.db.prepare(`UPDATE collection_tasks SET next_run_at=0,error=NULL,disabled=0,failures=0 WHERE provider=? AND scope=?
       AND key IN(SELECT task_key FROM collection_task_accounts WHERE account_id=?)`).run(provider,`account:${accountId}`,accountId);
   });
 }

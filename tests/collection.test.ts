@@ -48,6 +48,23 @@ test('任务租约并发保护、超时恢复与旧worker写入保护',()=>{
   assert.throws(()=>store.finish(r,{},null,'x',()=>{},base+900002),/stale_lease/);other.release(task,base+1000000);assert.equal(store.claim(task,base+1000001),true);
  }finally{db.close();}
 });
+test('任务连续失败3次自动停用，成功清零计数，重连授权恢复',()=>{
+ const {db,store}=setup();try{
+  const task=store.queue('index','account:1',{type:'topic_dates'},[{id:1,configSha:'one'}]);
+  for(let i=0;i<2;i++){const at=base+i*HOUR;store.claim(task,at);store.fail(store.begin(task,at),'request_failed',at);}
+  assert.equal(db.prepare('SELECT disabled FROM collection_tasks WHERE key=?').get(task.key).disabled,0);
+  store.claim(task,base+2*HOUR);store.fail(store.begin(task,base+2*HOUR),'request_failed',base+2*HOUR);
+  assert.equal(db.prepare('SELECT disabled,failures FROM collection_tasks WHERE key=?').get(task.key).disabled,1);
+  const file=join(root,'retry-auth.json');writeFileSync(file,JSON.stringify({cookie:'valid'}),{mode:0o600});
+  registerAuth(store,1,file);
+  const revived=db.prepare('SELECT disabled,failures,next_run_at FROM collection_tasks WHERE key=?').get(task.key);
+  assert.equal([revived.disabled,revived.failures,revived.next_run_at].join(),'0,0,0');
+  store.claim(task,base+3*HOUR);store.fail(store.begin(task,base+3*HOUR),'request_failed',base+3*HOUR);
+  store.claim(task,base+4*HOUR);store.finish(store.begin(task,base+4*HOUR),{},null,'x',()=>{},base+4*HOUR);
+  const settled=db.prepare('SELECT failures,disabled FROM collection_tasks WHERE key=?').get(task.key);
+  assert.equal([settled.failures,settled.disabled].join(),'0,0');
+ }finally{db.close();}
+});
 test('未登记授权不排指数任务也不伪造失败；登记后立即参与采集',async()=>{
  const {db,store}=setup();try{
   config(db,1,{index:{discovery:null,tasks:[{type:'videos',keyword:'测试'}]}});

@@ -108,9 +108,12 @@ export class CollectionStore {
     const task=this.db.prepare('SELECT lease_owner FROM collection_tasks WHERE key=?').get(run.task_key) as any;
     if(task?.lease_owner&&task.lease_owner!==this.owner)return;
     this.db.prepare('UPDATE collection_tasks SET failures=failures+1 WHERE key=?').run(run.task_key);
+    const failures=(this.db.prepare('SELECT failures FROM collection_tasks WHERE key=?').get(run.task_key) as any).failures;
     if(/login_required|rate_limited|payment_required|auth_required|invalid_auth|auth_file|ENOENT/.test(code))this.pause(run.provider,run.scope,code);
     if(/schema_error|decode_error|unsupported_encryption/.test(code))this.db.prepare('UPDATE collection_tasks SET disabled=1 WHERE provider=? AND scope=? AND operation=?').run(run.provider,run.scope,run.operation);
-    this.release({key:run.task_key},now+Math.min(86400000,300000*2**Math.min(6,(this.db.prepare('SELECT failures FROM collection_tasks WHERE key=?').get(run.task_key) as any).failures)),code);
+    // 除登录限流(暂停来源)与结构错误(按操作停用)外的错误连续 3 次即停用该任务,不再无限重试;成功清零,重连授权或 resume 恢复。
+    if(failures>=3)this.db.prepare('UPDATE collection_tasks SET disabled=1 WHERE key=?').run(run.task_key);
+    this.release({key:run.task_key},now+Math.min(86400000,300000*2**Math.min(6,failures)),code);
   }
   pause(provider: string,scope: string,error: string): void {
     this.db.prepare(`INSERT INTO collection_provider_state(provider,scope,paused,error) VALUES(?,?,1,?)
