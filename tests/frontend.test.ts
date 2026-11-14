@@ -29,16 +29,17 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
   let scroll = 0;
   Object.defineProperty(window, 'scrollY', { get: () => scroll });
   window.scrollTo = (_x, y) => { scroll = y; window.dispatchEvent(new window.Event('scroll')); };
-  const timers = new Map(); let timerId = 0;
+  const timers = new Map(), noticeTimers = new Map(); let timerId = 0;
   const originalInterval = globalThis.setInterval, originalClear = globalThis.clearInterval;
   replace('setInterval', (callback, ms, ...args) => {
-    if (ms !== 10000) return originalInterval(callback, ms, ...args);
-    timers.set(++timerId, () => callback(...args)); return timerId;
+    if (ms !== 10000 && ms !== 20000) return originalInterval(callback, ms, ...args);
+    (ms === 10000 ? timers : noticeTimers).set(++timerId, () => callback(...args)); return timerId;
   });
-  replace('clearInterval', id => { if (!timers.delete(id)) originalClear(id); });
+  replace('clearInterval', id => { if (!timers.delete(id) && !noticeTimers.delete(id)) originalClear(id); });
   const config = { schedules: Object.fromEntries(['index', 'douyin', 'xhs', 'bili'].map(provider => [provider, { enabled: false, times: ['10:00'], request_limit: 10 }])), index: { discovery: null, tasks: [] } };
   const accounts = [];
-  const requests = [], runs = [];
+  const requests = [], runs = [], bloggers = [];
+  const notices = { auth: [], issues: [], bloggers: [] };
   const emptyPlatform = () => ({ configured: false, paused: false, error: null, latest: null, deltaToday: null, delta7d: null, deltaLikes7: null, deltaViews7: null, series: [] });
   const monitorData = { platforms: { douyin: emptyPlatform(), xhs: emptyPlatform(), bili: emptyPlatform() }, total: { fans: 0, deltaToday: null, delta7d: null, platforms: 0 } };
   replace('fetch', async (input, init = {}) => {
@@ -52,7 +53,10 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     else if (url.pathname === '/api/accounts') data = accounts;
     else if (url.pathname === '/api/collection') data = { tasks: [], runs, budgets: [], credentials: {}, queue: { total: 0, due: 0 }, discovery: null };
     else if (url.pathname === '/api/collection/progress') data = { running: false, progress: null };
-    else if (url.pathname === '/api/bloggers') data = [];
+    else if (url.pathname === '/api/bloggers') data = bloggers;
+    else if (/^\/api\/bloggers\/\d+$/.test(url.pathname)) data = { id: 1, kind: 'blogger', userId: 'u1', name: '甲', status: 'ready', profile: {}, works: [], trend: null };
+    else if (url.pathname === '/api/notices') data = structuredClone(notices);
+    else if (url.pathname === '/api/run/collect' && method === 'POST') data = { started: true, run_id: 1 };
     else if (url.pathname === '/api/monitor') data = monitorData;
     else if (/^\/api\/auth\/[\w-]+$/.test(url.pathname)) data = { provider: url.pathname.split('/').at(-1), label: '平台', status: 'missing', configured: false, message: '尚未连接。' };
     else if (url.pathname === '/api/sources') data = { keywords: [] };
@@ -132,6 +136,30 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     assert.equal(requests.filter(request => request.url.pathname === '/api/monitor').at(-1).account, 2);
     await switchAccount(1);
     assert.equal(timers.size, 0);
+    // 提醒：登录失效出横幅并点亮采集红点，横幅直达「采集 → 连接」，状态恢复后自愈
+    assert.equal(noticeTimers.size, 1);
+    const navTab = label => [...window.document.querySelectorAll('nav[aria-label="工作台导航"] button')].find(value => value.textContent === label);
+    notices.auth = [{ provider: 'index' }], notices.issues = [{ kind: 'run_failed' }];
+    await act(async () => { for (const fire of [...noticeTimers.values()]) fire(); });
+    assert.match(window.document.body.textContent, /抖音指数登录已失效，相关采集已暂停。/);
+    assert.ok(navTab('采集').querySelector('.bg-danger'));
+    await act(async () => { [...window.document.querySelectorAll('button')].find(value => value.textContent === '去连接').click(); });
+    assert.match(window.document.body.textContent, /连接平台/);
+    notices.auth = [], notices.issues = [];
+    await act(async () => { for (const fire of [...noticeTimers.values()]) fire(); });
+    assert.ok(!/登录已失效/.test(window.document.body.textContent));
+    assert.ok(!navTab('采集').querySelector('.bg-danger'));
+    // 博主红点：首见静默记水位，新作品计未读，点开该博主即已读并落水位
+    bloggers.push({ id: 1, kind: 'blogger', userId: 'u1', name: '甲', status: 'ready' });
+    notices.bloggers = [{ id: 1, name: '甲', latest: '2026-11-14 07:00:00', items: [] }];
+    await act(async () => { for (const fire of [...noticeTimers.values()]) fire(); });
+    assert.equal(navTab('博主').textContent, '博主');
+    notices.bloggers = [{ id: 1, name: '甲', latest: '2026-11-14 08:00:00', items: [{ title: '新视频', url: 'https://www.douyin.com/video/1', addedAt: '2026-11-14 08:00:00' }] }];
+    await act(async () => { for (const fire of [...noticeTimers.values()]) fire(); });
+    assert.ok(navTab('博主1'), '博主红点未显示未读数');
+    await navigate('博主1'); // 进入博主页默认选中甲，即视为已读
+    assert.equal(window.localStorage.getItem('everyone-content-blogger-seen-1'), JSON.stringify({ 1: '2026-11-14 08:00:00' }));
+    assert.equal(navTab('博主').textContent, '博主');
   } finally {
     await act(async () => { root.unmount(); });
     for (const [key, descriptor] of originals) {

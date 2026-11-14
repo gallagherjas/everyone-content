@@ -25,10 +25,12 @@ function BudgetCard({ label, used, limit, connected }: { label: string; used: nu
   </div>;
 }
 
-export default function CollectPage({ current, onUpdate }: { current: Account; onUpdate: (account: Account) => void }) {
+export default function CollectPage({ current, onUpdate, jumpTo }: { current: Account; onUpdate: (account: Account) => void; jumpTo?: { section: string } | null }) {
   const api = useApi(), archived = current.status === "archived";
   const visible = usePageVisible(), invalidate = useInvalidatePages();
   const [section, setSection] = useState("overview");
+  // 横幅「去连接」的深链：令牌对象更新时切到对应小节。
+  useEffect(() => { if (jumpTo?.section) setSection(jumpTo.section); }, [jumpTo]);
   const [state, setState] = useState<State | null>(null), [percent, setPercent] = useState<number | null>(null);
   const [src, setSrc] = useState<{ keywords: Source[] }>({ keywords: [] }), [keyword, setKeyword] = useState(""), [bloggerName, setBloggerName] = useState("");
   const [bloggers, setBloggers] = useState<BloggerRow[]>([]);

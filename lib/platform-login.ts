@@ -14,6 +14,8 @@ import { ORIGIN } from '../collector/sources/douyin-index/protocol.ts';
 import { sessionFromCookies, loadSession, type PlatformAuth } from '../collector/sources/platform/session.ts';
 
 const running = (status: string) => status === 'preparing' || status === 'waiting';
+// 登录失效的统一口径：暂停原因命中这些受控错误码即视为会话失效，登录状态展示与工作台提醒共用。
+export const AUTH_ERROR = /login_required|auth_required|invalid_auth|auth_file/;
 const messages: Record<string, string> = {
   missing: '尚未连接。', preparing: '正在准备专用登录窗口，首次使用可能需要下载浏览器。',
   waiting: '请在打开的窗口完成登录并按页面提示验证，会话会自动保存在本机。',
@@ -134,7 +136,7 @@ export class PlatformLoginManager {
     const configured = !!db.prepare('SELECT 1 FROM collection_credentials WHERE account_id=? AND provider=?').get(id, provider);
     const error = db.prepare('SELECT error FROM collection_provider_state WHERE provider=? AND scope=?').get(provider, `account:${id}`)?.error;
     const job = this.jobs.get(`${provider}:${id}`);
-    const expired = /login_required|auth_required|invalid_auth|auth_file/.test(String(error ?? ''));
+    const expired = AUTH_ERROR.test(String(error ?? ''));
     const status = job && job.status !== 'configured' ? job.status : expired ? 'expired' : configured ? 'configured' : 'missing';
     return { provider, label: platform.label, status, configured, message: messages[status] };
   }

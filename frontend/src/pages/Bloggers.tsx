@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useApi, fmtNum, fmtTime, relTime } from "../api";
 import { Page } from "../components/Layout";
 import { Badge, Msg, NUM_TONE, VIDEO_BADGES } from "../components/Common";
+import { useNotices } from "../components/Notices";
 import { useCachedLoad } from "../components/PageCache";
 
 interface BloggerRow {
@@ -37,8 +38,11 @@ export default function BloggersPage() {
   const [failed, setFailed] = useState(false), [message, setMessage] = useState("");
   const load = useCallback(() => api<BloggerRow[]>("/api/bloggers").then(setRows).catch(() => setRows([])), [api]);
   useCachedLoad('bloggers', load);
+  // 侧栏各博主的未读新作品数；点开详情即视为已读（推进水位）。
+  const { bloggers: noticed, markBloggerSeen } = useNotices();
+  const newCounts = useMemo(() => new Map(noticed.map(b => [b.id, b.count])), [noticed]);
   const loadDetail = useCallback((id: number) => api<Detail>(`/api/bloggers/${id}`).then(setDetail).catch(e => { setDetail(null); setFailed(true); setMessage(String(e)); }), [api]);
-  useEffect(() => { setDetail(null); if (active && !active.startsWith("s")) loadDetail(Number(active)); }, [active, loadDetail]);
+  useEffect(() => { setDetail(null); if (active && !active.startsWith("s")) { loadDetail(Number(active)); markBloggerSeen(Number(active)); } }, [active, loadDetail, markBloggerSeen]);
   // 有待解析昵称时轮询，解析完成自动出现博主行。
   useEffect(() => {
     if (!rows.some(r => r.resolving)) return;
@@ -59,7 +63,7 @@ export default function BloggersPage() {
   useEffect(() => { if (!active && bloggers.length) setActive(String(bloggers[0].id)); }, [active, bloggers]);
 
   return <Page head="博主" active={active} onPick={setActive} items={[
-    ...bloggers.map(b => ({ key: String(b.id), label: b.name })),
+    ...bloggers.map(b => ({ key: String(b.id), label: <>{b.name}{newCounts.get(b.id) ? <span className="ml-1 text-xs font-medium text-danger">{newCounts.get(b.id)}</span> : null}</> })),
     ...pending.map(p => ({ key: `s${p.id}`, label: `${p.name}（解析中）` })),
   ]}>
     <div className="space-y-5">

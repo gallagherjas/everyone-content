@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, AccountContext, type Account } from "./api";
-import { Msg, PillTab } from "./components/Common";
+import { HoverTip, Msg, PillTab } from "./components/Common";
+import { NoticesProvider, NoticeBanner, issueText, useNotices } from "./components/Notices";
 import BloggersPage from "./pages/Bloggers";
 import CollectPage from "./pages/Collect";
 import CollectionPage from "./pages/Collection";
@@ -10,10 +11,38 @@ import { KeepAlive, PageCacheProvider } from "./components/PageCache";
 const TABS = [["monitor", "数据"], ["collection", "指数"], ["bloggers", "博主"], ["collect", "采集"], ["settings", "帐号"]];
 const ACCOUNT_KEY = "everyone-content-selected-account";
 
+// 顶部导航与登录失效横幅：红点素材来自提醒中心，采集页红点悬浮明细。
+function TopNav({ current, tab, setTab, onConnect }: {
+  current: Account; tab: string; setTab: (key: string) => void; onConnect: () => void;
+}) {
+  const { auth, issues, bloggerCount, collectIssue } = useNotices();
+  const dots: Record<string, boolean | number> = { collect: collectIssue > 0, bloggers: bloggerCount };
+  return <>
+    <header className="sticky top-0 z-40 mb-6 border-b border-line/70 py-4 backdrop-blur sm:py-5">
+      <div className="flex items-center gap-4 overflow-x-auto">
+        <div className="flex shrink-0 items-center gap-3">
+          <img className="h-12 w-12 shrink-0 object-contain" src="/brand/mascot.png" alt="" aria-hidden="true" />
+          <div>
+            <div className="text-lg font-semibold leading-tight">everyone-content</div>
+            <div className="text-xs leading-tight text-muted">{current.name}{current.status === "archived" ? "（已归档）" : ""}</div>
+          </div>
+        </div>
+        <nav className="flex shrink-0 items-center gap-0.5 rounded-full bg-ink/[0.06] p-1" aria-label="工作台导航">{TABS.map(([key, label]) => {
+          const pill = <PillTab key={key} active={tab === key} dot={dots[key]} onClick={() => setTab(key)}>{label}</PillTab>;
+          return key === "collect" && collectIssue > 0 ? <HoverTip key={key} text={issueText(auth, issues)}>{pill}</HoverTip> : pill;
+        })}</nav>
+      </div>
+    </header>
+    <NoticeBanner onConnect={onConnect} />
+  </>;
+}
+
 export default function App() {
   const [tab, setTab] = useState("monitor"), [accounts, setAccounts] = useState<Account[] | null>(null);
   const [id, setId] = useState<number | null>(() => Number(localStorage.getItem(ACCOUNT_KEY)) || null);
   const [error, setError] = useState(""), [busy, setBusy] = useState(false), [first, setFirst] = useState("");
+  // 横幅「去连接」的跳转令牌：新对象触发采集页切到对应小节。
+  const [jump, setJump] = useState<{ section: string } | null>(null);
   useEffect(() => {
     api<Account[]>("/api/accounts").then((rows) => {
       setAccounts(rows);
@@ -48,27 +77,18 @@ export default function App() {
   };
   const update = (a: Account) => setAccounts((rows) => rows?.map((old) => old.id === a.id ? a : old) ?? null);
   return <div className="mx-auto min-h-screen max-w-7xl px-4 pb-16 sm:px-6">
-    <header className="sticky top-0 z-40 mb-6 border-b border-line/70 py-4 backdrop-blur sm:py-5">
-      <div className="flex items-center gap-4 overflow-x-auto">
-        <div className="flex shrink-0 items-center gap-3">
-          <img className="h-12 w-12 shrink-0 object-contain" src="/brand/mascot.png" alt="" aria-hidden="true" />
-          <div>
-            <div className="text-lg font-semibold leading-tight">everyone-content</div>
-            {current && <div className="text-xs leading-tight text-muted">{current.name}{current.status === "archived" ? "（已归档）" : ""}</div>}
-          </div>
-        </div>
-        {current && <nav className="flex shrink-0 items-center gap-0.5 rounded-full bg-ink/[0.06] p-1" aria-label="工作台导航">{TABS.map(([key, label]) => <PillTab key={key} active={tab === key} onClick={() => setTab(key)}>{label}</PillTab>)}</nav>}
-      </div>
-    </header>
-    {error && <div className="mb-4"><Msg tone="error">{error}</Msg></div>}
-    {current && <AccountContext.Provider value={current.id}><PageCacheProvider key={current.id}><main>
-      {current.status === "archived" && tab !== "settings" && <p className="mb-5 text-sm text-warn">当前账号已归档，可查看历史；恢复账号请进入「帐号」。</p>}
-      <KeepAlive active={tab === "monitor"}><MonitorPage /></KeepAlive>
-      <KeepAlive active={tab === "collection"}><CollectionPage /></KeepAlive>
-      <KeepAlive active={tab === "bloggers"}><BloggersPage /></KeepAlive>
-      <KeepAlive active={tab === "collect"}><CollectPage current={current} onUpdate={update} /></KeepAlive>
-      <KeepAlive active={tab === "settings"}><SettingsPage current={current} accounts={accounts ?? []} onPick={selectAccount} onCreate={create} onDelete={remove} onUpdate={update} /></KeepAlive>
-    </main></PageCacheProvider></AccountContext.Provider>}
+    {current && <AccountContext.Provider value={current.id}><PageCacheProvider key={current.id}><NoticesProvider>
+      <TopNav current={current} tab={tab} setTab={setTab} onConnect={() => { setJump({ section: "auth" }); setTab("collect"); }} />
+      {error && <div className="mb-4"><Msg tone="error">{error}</Msg></div>}
+      <main>
+        {current.status === "archived" && tab !== "settings" && <p className="mb-5 text-sm text-warn">当前账号已归档，可查看历史；恢复账号请进入「帐号」。</p>}
+        <KeepAlive active={tab === "monitor"}><MonitorPage /></KeepAlive>
+        <KeepAlive active={tab === "collection"}><CollectionPage /></KeepAlive>
+        <KeepAlive active={tab === "bloggers"}><BloggersPage /></KeepAlive>
+        <KeepAlive active={tab === "collect"}><CollectPage current={current} onUpdate={update} jumpTo={jump} /></KeepAlive>
+        <KeepAlive active={tab === "settings"}><SettingsPage current={current} accounts={accounts ?? []} onPick={selectAccount} onCreate={create} onDelete={remove} onUpdate={update} /></KeepAlive>
+      </main>
+    </NoticesProvider></PageCacheProvider></AccountContext.Provider>}
     {accounts !== null && !current && <section className="panel mx-auto mt-16 max-w-md">
       <h2 className="text-center font-semibold text-lg">创建第一个账号</h2>
       <p className="mt-2 text-center text-sm text-muted">账号是独立的内容运营空间；后续在「帐号 → 帐号管理」新建、切换或删除。</p>

@@ -30,6 +30,7 @@ import {
 import { initializationOverview } from '../lib/initialization.ts';
 import { platformLogin, LOGIN_PLATFORMS } from '../lib/platform-login.ts';
 import { monitorOverview } from '../lib/monitor.ts';
+import { noticeOverview } from '../lib/notices.ts';
 import { CollectionStore, PROVIDERS, atomic } from '../collector/core/store.ts';
 import { collectionStatus } from '../collector/core/status.ts';
 import { planCollection } from '../collector/core/planner.ts';
@@ -415,6 +416,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
     return json(res, rollback(db, id, b.sha, b.base_sha));
   }
   if (path === '/api/monitor' && method === 'GET') return json(res, monitorOverview(db, id));
+  if (path === '/api/notices' && method === 'GET') return json(res, noticeOverview(db, id));
   if (path === '/api/run/collect' && method === 'POST') {
     const b = await body(req),
       extra: string[] = [];

@@ -99,12 +99,20 @@ export function Toggle({ checked, onChange, disabled, label, hint }: {
   );
 }
 
-/** 胶囊页签(顶部导航分段容器内):选中白底浮起,未选中弱化 */
-export function PillTab({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+/** 胶囊页签(顶部导航分段容器内):选中白底浮起,未选中弱化;dot 为真时右上角红点(true 圆点/数字徽标) */
+export function PillTab({ active, onClick, dot, children }: {
+  active: boolean; onClick: () => void; dot?: boolean | number; children: ReactNode;
+}) {
   return (
     <button onClick={onClick}
-      className={`shrink-0 rounded-full px-4 py-1.5 text-sm transition ${active ? "bg-card font-medium text-ink shadow-sm" : "text-muted hover:text-ink"}`}>
+      className={`relative shrink-0 rounded-full px-4 py-1.5 text-sm transition ${active ? "bg-card font-medium text-ink shadow-sm" : "text-muted hover:text-ink"}`}>
       {children}
+      {dot === true && <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-danger" />}
+      {typeof dot === "number" && dot > 0 && (
+        <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-medium leading-none text-white">
+          {dot > 99 ? "99+" : dot}
+        </span>
+      )}
     </button>
   );
 }

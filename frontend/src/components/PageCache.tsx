@@ -21,6 +21,8 @@ export function PageCacheProvider({ children }: { children: ReactNode }) {
 
 export const usePageVisible = () => useContext(Visible);
 export const useInvalidatePages = () => useContext(Changes).invalidate;
+// 版本号随任意写操作/采集完成自增，全局轮询类组件(如提醒)借此即时刷新。
+export const usePageVersions = () => useContext(Changes).versions;
 
 // Keep the first loaded view until the account workspace is unmounted.
 export function KeepAlive({ active, children }: { active: boolean; children: ReactNode }) {
