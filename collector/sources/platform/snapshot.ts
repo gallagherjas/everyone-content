@@ -2,7 +2,7 @@ import { hash, stamp, type CollectionStore } from '../../core/store.ts';
 import { loadSession, type PlatformAuth } from './session.ts';
 
 // 创作后台账号级快照:每平台每轮一个总览请求,解析为可空的指标集。
-// 候选端点为第一版推测,需扫码后以真实会话探测确认,命中后收敛为一个;schema_error 会自动禁用任务。
+// 抖音与小红书端点已用真实会话探测确认(2026-11-14),各收敛为一个;B站仍是推测候选,连上后需同样探测;schema_error 会自动禁用任务。
 interface PlatformSnapshot {
   origin: string;
   referer: string;
@@ -17,22 +17,22 @@ export const SNAPSHOT_PLATFORMS: Record<string, PlatformSnapshot> = {
   douyin: {
     origin: 'https://creator.douyin.com',
     referer: 'https://creator.douyin.com/',
-    endpoints: ['/aweme/v1/creator/data/overview/?period=day', '/aweme/v1/creator/data/overview/'],
-    uid: ['data.uid', 'data.user_id', 'data.author.uid'],
-    fans: ['data.fan_count', 'data.follower_count', 'data.fans_cnt', 'data.stats.fans'],
-    likes: ['data.total_like_count', 'data.like_count', 'data.digg_count', 'data.stats.likes'],
-    works: ['data.aweme_count', 'data.works_count', 'data.video_count', 'data.stats.works'],
-    views: ['data.total_play_count', 'data.play_count', 'data.stats.views'],
+    endpoints: ['/aweme/v1/creator/user/info/'],
+    uid: [],
+    fans: ['douyin_user_verify_info.follower_count', 'user_profile.follower_count'],
+    likes: ['douyin_user_verify_info.total_favorited', 'user_profile.total_favorited'],
+    works: [],
+    views: [],
   },
   xhs: {
     origin: 'https://creator.xiaohongshu.com',
     referer: 'https://creator.xiaohongshu.com/',
-    endpoints: ['/api/galaxy/creation/data/dashboard', '/api/galaxy/user/overview'],
-    uid: ['data.userId', 'data.user_id', 'data.uid'],
-    fans: ['data.fans', 'data.follower_count', 'data.stats.fans'],
-    likes: ['data.like_collect', 'data.likes', 'data.stats.likes'],
-    works: ['data.note_count', 'data.works', 'data.stats.notes'],
-    views: ['data.read_cnt', 'data.views', 'data.stats.reads'],
+    endpoints: ['/api/galaxy/creator/home/personal_info'],
+    uid: ['data.red_num'],
+    fans: ['data.fans_count', 'data.grow_info.fans_count'],
+    likes: ['data.faved_count'],
+    works: [],
+    views: [],
   },
   bili: {
     origin: 'https://member.bilibili.com',
