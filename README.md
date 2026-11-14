@@ -2,7 +2,7 @@
 
 # everyone-content
 
-<img src="frontend/public/brand/mascot.png" alt="everyone-content的小电视角色" width="96" />
+<img src="frontend/public/brand/mascot.png?v=2" alt="everyone-content 吉祥物" width="96" />
 
 **本地优先的多账号内容运营工作台**：用抖音指数发现选题素材，用账号画像约束决策，更快速、更高质量完成「采集 → 选题 → 评估 → 写作」的全过程。
 

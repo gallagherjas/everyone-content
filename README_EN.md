@@ -2,7 +2,7 @@
 
 # everyone-content
 
-<img src="frontend/public/brand/mascot.png" alt="everyone-content mascot" width="96" />
+<img src="frontend/public/brand/mascot.png?v=2" alt="everyone-content mascot" width="96" />
 
 **A local-first workbench for multi-account content operations**: discover topic material through the Douyin Index, ground decisions in per-account profiles, and complete the whole collect → select → review → write process faster and with higher quality.
 
