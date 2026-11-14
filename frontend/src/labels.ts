@@ -6,5 +6,6 @@ const errors: Record<string, string> = {
   auth_file_must_be_private_0600: "授权文件须仅本人可读写（0600）", source_dates_missing: "等待获取来源有效日期",
   service_unavailable: "来源服务不可用，请检查服务连接", transport_error: "来源网络请求失败，请检查代理连接",
   daily_budget_exhausted: "今日采集次数已达上限", tick_budget_exhausted: "本轮采集次数已达上限",
+  interval_pending: "等待平台请求间隔，到点后下次采集补上",
 };
 export const reason = (code: string | null): string | null => (code ? errors[code] ?? code : null);

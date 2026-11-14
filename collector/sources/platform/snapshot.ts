@@ -82,7 +82,7 @@ export async function fetchSnapshot(provider: string, auth: PlatformAuth, client
       if (!res.ok) continue;
       text = await res.text();
     } catch (error) {
-      if (/^(login_required|rate_limited|daily_budget_exhausted|tick_budget_exhausted|source_paused)$/.test((error as Error)?.message ?? '')) throw error;
+      if (/^(login_required|rate_limited|daily_budget_exhausted|tick_budget_exhausted|source_paused)$|^interval_pending/.test((error as Error)?.message ?? '')) throw error;
       continue;
     }
     if (/^\s*</.test(text)) throw new Error('login_required');

@@ -119,6 +119,13 @@ export async function runCollection(store: CollectionStore,options: RunOptions={
       for(const id of participants)summary.accounts[id][result.cached?'cached':'completed']++;
       options.log?.(`${task.provider}/${task.operation} ${task.target}：${result.cached?'复用有效版本':'完成'}`,participants);
     }catch(error){
+      const pending=/^interval_pending (\d+)$/.exec((error as Error)?.message??'');
+      if(pending){
+        store.db.prepare("UPDATE collection_runs SET status='deferred',error='interval_pending' WHERE id=?").run(run.id);
+        store.release(task,Number(pending[1]),'interval_pending');summary.deferred++;
+        options.log?.(`${task.provider}/${task.operation} ${task.target}：interval_pending`,participants);
+        continue;
+      }
       const code=controlledError(error);
       if(/^(daily|tick)_budget_exhausted$/.test(code)){
         store.db.prepare("UPDATE collection_runs SET status='deferred',error=? WHERE id=?").run(code,run.id);

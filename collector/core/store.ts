@@ -75,7 +75,10 @@ export class CollectionStore {
       const state=this.db.prepare('SELECT * FROM collection_provider_state WHERE provider=? AND scope=?').get(run.provider,run.scope) as any;
       if(state?.paused)throw new Error('source_paused');
       const previous=(this.db.prepare('SELECT MAX(last_request_at) at FROM collection_provider_state WHERE provider=?').get(run.provider) as any)?.at??0;
-      const at=sourceKey?now:Math.max(now,previous+limit.interval_ms),day=new Date(at).toISOString().slice(0,10);
+      const at=sourceKey?now:Math.max(now,previous+limit.interval_ms);
+      // 距离允许的请求窗口还很久时不占额度不占锁,任务延后到窗口时刻,由下一次采集触发;避免进程内长睡冻结进度并独占采集资源。
+      if(!sourceKey&&at-now>600000)throw new Error(`interval_pending ${at}`);
+      const day=new Date(at).toISOString().slice(0,10);
       const used=(this.db.prepare('SELECT COUNT(*) n FROM collection_requests WHERE provider=? AND day=?').get(run.provider,day) as any).n;
       if(used>=limit.daily_limit)throw new Error('daily_budget_exhausted');
       const id=Number(this.db.prepare('INSERT INTO collection_requests(run_id,provider,scope,day,at_ms,endpoint,source_key,parameters) VALUES(?,?,?,?,?,?,?,?)')

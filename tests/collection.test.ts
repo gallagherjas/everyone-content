@@ -65,6 +65,24 @@ test('任务连续失败3次自动停用，成功清零计数，重连授权恢�
   assert.equal([settled.failures,settled.disabled].join(),'0,0');
  }finally{db.close();}
 });
+test('平台快照遇请求间隔即延后到窗口时刻，不占额度不睡进程，窗口后采集成功',async()=>{
+ const {db,store}=setup();try{
+  db.prepare("UPDATE collection_limits SET interval_ms=3600000 WHERE provider='douyin'").run();
+  const file=join(root,'douyin-auth.json');writeFileSync(file,JSON.stringify({cookie:'ok'}),{mode:0o600});
+  registerAuth(store,1,file,'douyin');
+  db.prepare("INSERT INTO collection_provider_state VALUES('douyin','account:1',0,NULL,?)").run(base);
+  const fetchImpl=async()=>json({douyin_user_verify_info:{follower_count:3,total_favorited:9}});
+  const opts={accountIds:[1],only:'douyin',clock:()=>base+1000,fetchImpl,sleep:async()=>{}};
+  const first=await runCollection(store,opts);
+  assert.equal(first.deferred,1);assert.equal(first.completed,0);
+  const task=db.prepare('SELECT error,next_run_at FROM collection_tasks WHERE provider=?').get('douyin');
+  assert.equal(task.error,'interval_pending');assert.equal(task.next_run_at,base+3600000);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM collection_requests WHERE provider='douyin'").get().n,0);
+  const later=await runCollection(store,{...opts,clock:()=>base+3600001});
+  assert.equal(later.completed,1);
+  assert.equal(db.prepare("SELECT failures,error FROM collection_tasks WHERE provider='douyin'").get().failures,0);
+ }finally{db.close();}
+});
 test('未登记授权不排指数任务也不伪造失败；登记后立即参与采集',async()=>{
  const {db,store}=setup();try{
   config(db,1,{index:{discovery:null,tasks:[{type:'videos',keyword:'测试'}]}});
