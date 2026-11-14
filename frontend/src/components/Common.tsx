@@ -31,13 +31,16 @@ export type BadgeTone = keyof typeof BADGE_TONES;
 /** 视频官方标记的唯一口径：指数榜与博主作品共用同一份标签色与文案 */
 export const VIDEO_BADGES: Record<string, { label: string; tone: BadgeTone }> = {
   lowFansHot: { label: "低粉爆款", tone: "blue" },
-  highFansRise: { label: "高涨粉", tone: "brand" },
+  highFansRise: { label: "高涨粉", tone: "up" },
   highLikeRate: { label: "高点赞率", tone: "rose" },
   highPlayOver: { label: "高完播率", tone: "violet" },
 };
 
+/** 指标数值分色口径,跨卡片一致:指数=墨,粉丝/关注=蓝,赞=玫红,评=黄,转=绿;标签保持灰色 */
+export const NUM_TONE = { index: "text-ink", audience: "text-blue", feedback: "text-rose", comment: "text-yellow", share: "text-up" };
+
 export function Badge({ tone = "gray", children }: { tone?: BadgeTone; children: ReactNode }) {
-  return <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs leading-4 ${BADGE_TONES[tone]}`}>{children}</span>;
+  return <span className={`inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs leading-4 ${BADGE_TONES[tone]}`}>{children}</span>;
 }
 
 /** 悬浮提示:默认在上方显示带小角的面板,上方空间不足时翻到下方 */

@@ -9,12 +9,13 @@
   --color-faint: #b0b3ba;
   --color-brand: #2f7cf6; /* 品牌蓝:主按钮/链接/选中态 */
   --color-brand-deep: #1e5fc4;
-  --color-up: #16a34a; /* 增长/正向变动:与品牌色区分的涨跌语义色 */
+  --color-up: #16a34a; /* 增长/正向变动,高涨粉徽章与转发数沿用:与品牌色区分的涨跌语义色 */
   --color-warn: #e64980; /* 提示/提醒:玫红,与 rose 同族 */
   --color-danger: #dc2626; /* 错误/删除/确认态 */
-  --color-blue: #2f7cf6; /* 辅助多彩:视频徽章四色用 */
+  --color-blue: #2f7cf6; /* 辅助多彩:视频徽章与指标数值分色用 */
   --color-violet: #7c5cf0;
   --color-rose: #e64980;
+  --color-yellow: #ca8a04; /* 辅助多彩:评论数用,取深金保证白卡可读 */
   --shadow-card: 0 1px 2px rgb(23 25 30 / 0.04), 0 8px 24px -16px rgb(23 25 30 / 0.10);
   --font-sans: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
 }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi, fmtNum, fmtTime, relTime } from "../api";
 import { Page } from "../components/Layout";
-import { Badge, Msg, VIDEO_BADGES } from "../components/Common";
+import { Badge, Msg, NUM_TONE, VIDEO_BADGES } from "../components/Common";
 import { useCachedLoad } from "../components/PageCache";
 
 interface BloggerRow {
@@ -80,7 +80,7 @@ export default function BloggersPage() {
                   <span>粉丝 <span className="font-medium text-ink">{fmtNum(detail.profile?.fans ?? null)}</span></span>
                   <span>获赞 <span className="font-medium text-ink">{fmtNum(detail.profile?.likes ?? null)}</span></span>
                   <span>作品 <span className="font-medium text-ink">{fmtNum(detail.profile?.items ?? null)}</span></span>
-                  {detail.profile?.tag1 && <span className="rounded-full bg-brand/10 px-2 py-0.5 text-xs text-brand">{[detail.profile.tag1, detail.profile.tag2].filter(Boolean).join(" / ")}</span>}
+                  {detail.profile?.tag1 && <span className="whitespace-nowrap rounded-full bg-brand/10 px-2 py-0.5 text-xs text-brand">{[detail.profile.tag1, detail.profile.tag2].filter(Boolean).join(" / ")}</span>}
                 </p>
                 {detail.profile?.intro && <p className="mt-2 max-w-2xl whitespace-pre-line text-sm leading-6 text-muted">{detail.profile.intro}</p>}
                 <p className="mt-2 text-xs text-faint">最近采集 {detail.lastCollectAt ? `${fmtTime(detail.lastCollectAt)}（${relTime(detail.lastCollectAt)}）` : "尚未采集"}；开关与移出在「采集 → 博主」。</p>
@@ -108,10 +108,10 @@ export default function BloggersPage() {
                 <p className="mt-1.5 flex flex-wrap items-center justify-between gap-2 text-xs leading-6 text-muted">
                   <span className="shrink-0">{w.publishedAt ? `${w.publishedAt.endsWith("+08:00") ? fmtTime(w.publishedAt).slice(0, 10) : fmtTime(w.publishedAt)} 发布` : "发布时间未知"}</span>
                   <span className="flex shrink-0 items-baseline gap-3 tabular-nums">
-                    <span className="w-20">赞 <span className="font-medium text-ink">{fmtNum(w.likes)}</span></span>
-                    <span className="w-16">评 <span className="font-medium text-ink">{fmtNum(w.comments)}</span></span>
-                    <span className="w-16">转 <span className="font-medium text-ink">{fmtNum(w.shares)}</span></span>
-                    <span className="w-20">关注 <span className="font-medium text-ink">{fmtNum(w.follows)}</span></span>
+                    <span className="w-20">赞 <span className={NUM_TONE.feedback}>{fmtNum(w.likes)}</span></span>
+                    <span className="w-16">评 <span className={NUM_TONE.comment}>{fmtNum(w.comments)}</span></span>
+                    <span className="w-16">转 <span className={NUM_TONE.share}>{fmtNum(w.shares)}</span></span>
+                    <span className="w-20">关注 <span className={NUM_TONE.audience}>{fmtNum(w.follows)}</span></span>
                   </span>
                 </p>
               </div>)}

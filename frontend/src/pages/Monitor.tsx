@@ -27,7 +27,7 @@ interface MonitorData {
 
 const Delta = ({ value }: { value: number | null }) =>
   value == null ? <span className="text-xs text-faint">待下次快照</span>
-    : <span className={`rounded-full px-2 py-0.5 text-xs leading-4 ${value >= 0 ? "bg-up/10 text-up" : "bg-danger/10 text-danger"}`}>{value >= 0 ? "+" : ""}{fmtNum(value)}</span>;
+    : <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-xs leading-4 ${value >= 0 ? "bg-up/10 text-up" : "bg-danger/10 text-danger"}`}>{value >= 0 ? "+" : ""}{fmtNum(value)}</span>;
 
 const stateText = (p: PlatformData) => (p.configured ? (p.paused ? "登录失效" : "已连接") : "未连接");
 /** 速览文案里的动态数值与平台名:墨色中量字重,与灰色模板文字区分 */
