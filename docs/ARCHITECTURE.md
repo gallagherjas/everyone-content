@@ -56,7 +56,7 @@ everyone-content/
 
 ## 账号隔离与画像版本
 
-服务从请求头确定当前账号，按 `account_id` 核对对象归属。采集任务使用 `account:<编号>` 区分授权范围。
+服务从请求头确定当前账号，按 `account_id` 核对对象归属。采集任务和请求缓存使用 `account:<编号>` 区分授权范围。指数榜单和博主历史按 `collection_run_accounts` 中的账号关联读取，登录授权用于发起采集。
 
 画像正文通过 Git 引用 `refs/everyone-content/profiles/<account_id>` 版本化，SQLite 保存生效版本指针和审计记录。草稿位于 `runtime/drafts/<account_id>/`，生效快照位于 `runtime/releases/<sha>/`。[画像版本实现](../lib/strategies.ts)
 

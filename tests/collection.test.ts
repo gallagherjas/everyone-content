@@ -509,6 +509,22 @@ test('博主链路：昵称搜索解析为博主，作品按指数落库并进�
   assert.equal(detail.works[0].publishedAt,'2026-11-07T00:00:00+08:00');assert.equal(detail.trend,null);
   db.prepare("UPDATE works SET published_at='2026-11-07 02:00:00' WHERE url LIKE '%/7703'").run();
   assert.deepEqual(bloggerDetail(store,1,row).works.map(w=>w.id),['7703','7702','7701']);
+
+  const linked=createAccount(db,'关联历史的账号');
+  config(db,linked.id,{index:account(db,1).config.index});
+  db.prepare(`INSERT INTO account_sources(account_id,kind,source_key,name,status,note,options)
+    SELECT ?,kind,source_key,name,status,note,options FROM account_sources WHERE account_id=1`).run(linked.id);
+  const linkedBlogger=db.prepare("SELECT * FROM account_sources WHERE account_id=? AND kind='blogger'").get(linked.id);
+  assert.equal(collectionStatus(db,account(db,linked.id),store).discovery,null);
+  assert.deepEqual(bloggerDetail(store,linked.id,linkedBlogger).works,[]);
+  db.prepare(`INSERT INTO collection_run_accounts(run_id,account_id,config_sha)
+    SELECT run_id,?,config_sha FROM collection_run_accounts WHERE account_id=1`).run(linked.id);
+  const linkedStatus=collectionStatus(db,account(db,linked.id),store);
+  assert.deepEqual(linkedStatus.credentials,{});
+  assert.deepEqual(linkedStatus.tasks,[]);
+  assert.deepEqual(linkedStatus.discovery.versions,{topics:'20261105',videos:'20261105'});
+  assert.equal(bloggerOverview(db,store,linked.id)[0].lastCollectAt,overview[0].lastCollectAt);
+  assert.deepEqual(bloggerDetail(store,linked.id,linkedBlogger).works,bloggerDetail(store,1,row).works);
  }finally{db.close();}
 });
 test('手动采集按范围独立：topic 只跑话题域，author 只跑达友域',async()=>{

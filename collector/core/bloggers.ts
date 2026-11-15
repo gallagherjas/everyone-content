@@ -2,7 +2,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { count } from './discovery.ts';
 import { identity } from './projection.ts';
-import { taskKey, type CollectionStore } from './store.ts';
+import type { CollectionStore } from './store.ts';
 import { upsertAuthor,upsertWork,workUrl } from '../../lib/works.ts';
 import { linkWork } from '../../lib/accounts.ts';
 import { parseTime } from '../../lib/time.ts';
@@ -30,18 +30,21 @@ function worksFromCapture(data: any) {
   }
   return [...merged.values()];
 }
-const latestRun = (store: CollectionStore, scope: string, type: string, id: string) => {
-  const run = store.latest(taskKey('index', scope, { type, id }));
-  return run && run.status === 'ok' ? { run, data: store.data(run) } : null;
+const latestRun = (store: CollectionStore, accountId: number, type: string, id: string) => {
+  const run = store.db.prepare(`SELECT r.* FROM collection_runs r
+    JOIN collection_run_accounts x ON x.run_id=r.id
+    WHERE x.account_id=? AND r.provider='index' AND r.operation=? AND r.target=? AND r.status='ok'
+    ORDER BY r.id DESC LIMIT 1`).get(accountId, type, id);
+  return run ? { run, data: store.data(run) } : null;
 };
 
 /** 把各博主最新 author_* 捕获落库：作品+作者身份+观测(指数事实与日增序列)。 */
-export function projectBloggers(store: CollectionStore, a: any, scope: string): void {
+export function projectBloggers(store: CollectionStore, a: any): void {
   const db = store.db;
   const bloggers = db.prepare("SELECT * FROM account_sources WHERE account_id=? AND kind='blogger'").all(a.id) as any[];
   for (const s of bloggers) {
     const profile = profileOf(s);
-    const works = latestRun(store, scope, 'author_works', s.source_key);
+    const works = latestRun(store, a.id, 'author_works', s.source_key);
     if (works) {
       for (const w of worksFromCapture(works.data)) {
         const work = { id: w.id, title: w.title, publishedAt: w.publishedAt, authorId: profile.secUid ?? '', authorName: s.name,
@@ -53,7 +56,7 @@ export function projectBloggers(store: CollectionStore, a: any, scope: string): 
         store.observation(works.run, 'work', wid, 'author_works', { likes: w.likes, comments: w.comments, shares: w.shares, follows: w.follows });
       }
     }
-    const core = latestRun(store, scope, 'author_core', s.source_key);
+    const core = latestRun(store, a.id, 'author_core', s.source_key);
     if (core) {
       const series = (rows: any) => (rows ?? []).map((r: any) => ({ date: r.date, count: count(r.count) })).filter((r: any) => r.date);
       store.observation(core.run, 'author', s.source_key, 'author_core', {
@@ -61,7 +64,7 @@ export function projectBloggers(store: CollectionStore, a: any, scope: string): 
         summary: { newFansDay: count(core.data.fans_info?.new_fans_count_by_day), newFansWeek: count(core.data.fans_info?.new_fans_count_by_week), newLikesDay: count(core.data.like_info?.new_like_count_by_day) },
       });
     }
-    const info = latestRun(store, scope, 'author_info', s.source_key);
+    const info = latestRun(store, a.id, 'author_info', s.source_key);
     if (info) {
       if (profile.secUid) db.prepare("UPDATE authors SET name=?,follower_count=? WHERE platform='douyin' AND author_id=?")
         .run(String(info.data.user_name ?? s.name), count(info.data.fans_count), profile.secUid);
@@ -77,12 +80,11 @@ export function projectBloggers(store: CollectionStore, a: any, scope: string): 
 
 /** API 列表视图：登记行 + 概要统计(作品数来自已落库作品，最后采集时间来自最新 works 捕获)。 */
 export function bloggerOverview(db: DatabaseSync, store: CollectionStore, accountId: number): any[] {
-  const scope = (db.prepare("SELECT scope FROM collection_credentials WHERE account_id=? AND provider='index'").get(accountId) as any)?.scope;
   return (db.prepare("SELECT * FROM account_sources WHERE account_id=? AND kind IN ('blogger','blogger_search') ORDER BY id").all(accountId) as any[])
     .map(row => {
       if (row.kind === 'blogger_search') return { id: row.id, kind: row.kind, name: row.name, status: row.status, note: row.note, resolving: row.status === 'ready' };
       const profile = profileOf(row);
-      const works = scope ? latestRun(store, scope, 'author_works', row.source_key) : null;
+      const works = latestRun(store, accountId, 'author_works', row.source_key);
       const worksCount = profile.secUid
         ? (db.prepare(`SELECT COUNT(*) n FROM works w WHERE w.platform='douyin' AND w.author_id=?
             AND EXISTS(SELECT 1 FROM account_works aw WHERE aw.work_id=w.id AND aw.account_id=?)`).get(profile.secUid, accountId) as any).n
@@ -96,14 +98,12 @@ export function bloggerOverview(db: DatabaseSync, store: CollectionStore, accoun
 /** API 详情视图：概览合并最新 info、作品列表与 core 日增序列。 */
 export function bloggerDetail(store: CollectionStore, accountId: number, row: any): any | null {
   const db = store.db;
-  const scope = (db.prepare("SELECT scope FROM collection_credentials WHERE account_id=? AND provider='index'").get(accountId) as any)?.scope;
-  if (!scope) throw new Error('尚未连接抖音指数');
   const profile = { ...profileOf(row) };
-  const info = latestRun(store, scope, 'author_info', row.source_key);
+  const info = latestRun(store, accountId, 'author_info', row.source_key);
   if (info) Object.assign(profile, { fans: count(info.data.fans_count), likes: count(info.data.like_count), items: count(info.data.item_count),
     tag1: info.data.first_tag_name ?? null, tag2: info.data.second_tag_name ?? null, intro: String(info.data.user_introduction ?? ''), lastInfoAt: info.run.observed_at });
-  const works = latestRun(store, scope, 'author_works', row.source_key);
-  const core = latestRun(store, scope, 'author_core', row.source_key);
+  const works = latestRun(store, accountId, 'author_works', row.source_key);
+  const core = latestRun(store, accountId, 'author_core', row.source_key);
   // 跨域共享：同一作品若被关键词采集过，合并精确发布时间与官方标记(低粉爆款等)。
   const shared = profile.secUid
     ? (db.prepare(`SELECT w.id wid,w.url,w.published_at,

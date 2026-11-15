@@ -74,7 +74,7 @@ export function planCollection(store: CollectionStore,options: PlanOptions={}): 
               advanceVersion(task,indexEffectiveVersion(type,day));
             }
           }
-          projectBloggers(store,a,cred.scope);
+          projectBloggers(store,a);
         }
       }
       // 创作后台快照:各平台独立凭证,登记了哪个平台就排哪个,每天一次账号级快照。

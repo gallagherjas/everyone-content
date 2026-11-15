@@ -69,7 +69,10 @@ export function collectionStatus(db: DatabaseSync,a: any,store: CollectionStore 
     FROM collection_limits l ORDER BY l.provider`).all(today) as any[];
   let discovery=null;
   const credentials=Object.fromEntries((db.prepare('SELECT provider FROM collection_credentials WHERE account_id=?').all(a.id) as any[]).map(r=>[r.provider,true]));
-  if(credentials.index&&store)discovery=selectionView(indexSelection(store,a));
+  if(store&&(credentials.index||db.prepare(`SELECT 1 FROM collection_run_accounts x
+    JOIN collection_runs r ON r.id=x.run_id
+    WHERE x.account_id=? AND r.provider='index' AND r.status='ok' LIMIT 1`).get(a.id)))
+    discovery=selectionView(indexSelection(store,a));
   const queue={total:tasks.length,due:tasks.filter(t=>t.status==='due').length};
   return {tasks,runs,budgets,discovery,queue,credentials};
 }
