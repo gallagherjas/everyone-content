@@ -7,7 +7,7 @@
 **A local-first workbench for multi-account content operations**: discover topic material through the Douyin Index, ground decisions in per-account profiles, and complete the whole collect → select → review → write process faster and with higher quality.
 
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPLv3-blue.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%E2%89%A524-green)
+![Node](https://img.shields.io/badge/node-%E2%89%A524-green)
 ![Local-first](https://img.shields.io/badge/data-local--first-orange)
 [![CI](https://github.com/gallagherjas/everyone-content/actions/workflows/ci.yml/badge.svg)](https://github.com/gallagherjas/everyone-content/actions/workflows/ci.yml)
 
@@ -28,7 +28,7 @@ Tip: the agent never picks topics for you, because it leans too heavily on histo
 
 ## Quick start
 
-Requires **Node.js 24+**, **Git**, and an agent that can read project instructions and local skills. macOS, Linux, and Windows are supported (CI runs on both platforms); index QR login needs a local desktop.
+Requires **Node.js 24+**, **Git**, and an agent that can read project instructions and local skills (such as Codex or Claude Code). The workbench supports macOS, Linux, and Windows. CI runs on Linux and Windows. QR login requires a local graphical desktop.
 
 ```sh
 git clone https://github.com/gallagherjas/everyone-content.git
@@ -39,7 +39,7 @@ npm run build:web
 npm run web
 ```
 
-Open http://127.0.0.1:8788 and enter a name in the workbench to create an account. If the port is in use, run `WEB_PORT=8789 npm run web`.
+Open http://127.0.0.1:8788 and enter a name in the workbench to create an account. If the port is in use, follow [`.env.example`](.env.example) and set `WEB_PORT=8789` in the project directory's `.env` file. Start the server and open http://127.0.0.1:8789.
 
 Open an agent conversation in the project directory and try either of these requests.
 
@@ -49,7 +49,7 @@ Open an agent conversation in the project directory and try either of these requ
 ## Core flow
 
 1. **Set up an account.** Create or select an account, publish its completed profile, connect to the Douyin Index, and save keywords and exclusion words. For an existing account, resume from the missing steps. 
-2. **Collect.** Run a round from Collect → Overview, ask the agent to run it for a specific account, or enable a schedule in Collect → Schedule.
+2. **Collect.** Run a round from Collect → Overview or use the dropdown next to the button to choose a collection scope. You can also ask the agent to collect for a specific account or enable a schedule in Collect → Schedule.
 3. **Pick topics yourself.** Browse the leaderboard in Index → Videos, watch the videos on the platform, and decide which topics to pursue.
 4. **Ask the agent to review a topic.** Once the completed profile is published, submit a **title, target audience, and one-line value**. The agent checks account fit, consistency, and specificity. You can include reference videos.
 5. **Write on demand.** Before drafting or editing, provide 3 of your own video scripts with at least 300 characters of body text in total. 
@@ -60,9 +60,9 @@ Each account is an independent local workspace for content operations, with a na
 
 ## Privacy & data boundaries
 
-- Everything stays local: SQLite database, runtime data, profile Git repository. No third-party services.
-- Sessions and authorization files are secrets (0600), never committed, never echoed to the frontend.
-- Writing preferences and originals are stored per account under local `runtime/writing/` (0600), with count and size caps.
+- The SQLite database, runtime data, and Git profile history stay on your computer. Login and collection connect to the relevant platforms.
+- Keep `.env`, login sessions, and authorization files local and out of Git commits. The application reads session and authorization files locally.
+- Writing preferences and originals are stored per account under local `runtime/writing/`, with count and size caps. On systems with POSIX permissions, the workbench saves session and writing corpus files with mode `0600`.
 - Reviews and drafts are delivered in conversation; the workbench has no registration entry.
 - UI times are interpreted as Beijing time; the database stores UTC.
 - **Usage boundary**: this project is for data collection and inspiration only — plagiarism and imitation are rejected. Collected topics, videos, and creator data serve only as factual references for topic selection; keep your own work independent and original.

@@ -2,7 +2,7 @@
 
 ## 初始化
 
-先确认初始化状态。以 `GET /api/initialization` 的 `setup.complete` 为准（服务未启动时视为未完成）。未完成时先读[账号初始化](skills/initialization/SKILL.md)，除初始化相关问题外，在首次回答末尾加上“项目尚未初始化，要现在开始吗？”，语言跟随用户语言；之后的回答不加。
+先确认初始化状态。以 `GET /api/initialization` 返回的 `accounts[]` 中对应账号的 `setup.complete` 为准（服务未启动时视为未完成）。未完成时先读[账号初始化](skills/initialization/SKILL.md)，除初始化相关问题外，在首次回答末尾加上“项目尚未初始化，要现在开始吗？”，语言跟随用户语言；之后的回答不加。
 
 ## 使用场景
 

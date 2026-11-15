@@ -7,7 +7,7 @@
 **本地优先的多账号内容运营工作台**：用抖音指数发现选题素材，用账号画像约束决策，更快速、更高质量完成「采集 → 选题 → 评估 → 写作」的全过程。
 
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPLv3-blue.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%E2%89%A524-green)
+![Node](https://img.shields.io/badge/node-%E2%89%A524-green)
 ![Local-first](https://img.shields.io/badge/data-local--first-orange)
 [![CI](https://github.com/gallagherjas/everyone-content/actions/workflows/ci.yml/badge.svg)](https://github.com/gallagherjas/everyone-content/actions/workflows/ci.yml)
 
@@ -28,7 +28,7 @@ tips：不让agent选题的原因是它太注重历史数据并且缺乏创意�
 
 ## 快速开始
 
-需要 **Node.js 24+**、**Git** 和一个能读取项目指令与本地Skill的Agent（Codex、Claude Code 等）。支持 macOS、Linux 与 Windows（CI 在两个平台运行）；指数扫码登录需要本机图形桌面。
+需要 **Node.js 24+**、**Git** 和一个能读取项目指令与本地 Skill 的 Agent（Codex、Claude Code 等）。支持 macOS、Linux 与 Windows，CI 在 Linux 和 Windows 上运行。扫码登录需要本机图形桌面。
 
 ```sh
 git clone https://github.com/gallagherjas/everyone-content.git
@@ -39,7 +39,7 @@ npm run build:web
 npm run web
 ```
 
-打开 http://127.0.0.1:8788，可以在工作台输入名称创建账号。端口被占用时用 `WEB_PORT=8789 npm run web`。
+打开 http://127.0.0.1:8788，可以在工作台输入名称创建账号。端口被占用时，参考 [`.env.example`](.env.example)，在项目目录的 `.env` 中设置 `WEB_PORT=8789`，启动后打开 http://127.0.0.1:8789。
 
 在项目目录打开 Agent 对话，可以这样提问。
 
@@ -48,7 +48,7 @@ npm run web
 ## 核心流程
 
 1. **初始化**。创建或选择账号，完善并生效画像，连接抖音指数，再保存关键词与排除词。
-2. **采集**。在「采集 → 总览」手动运行一轮，也可以让 Agent 为指定账号执行采集，或在「采集 → 定时」开启定时采集。
+2. **采集**。在「采集 → 总览」手动运行一轮，或用按钮旁的下拉菜单选择采集范围。也可以让 Agent 为指定账号执行采集，或在「采集 → 定时」开启定时采集。
 3. **自行选题**。在「指数 → 视频指数」浏览榜单，打开原平台观看后自行决定选题。
 4. **Agent 评估**。画像完整并生效后，在对话中提交**标题、目标群体、主要价值（一句话）**，检查账号匹配、信息一致性和表达是否具体，可附参考作品。
 5. **按需写作**。写稿、改稿前必须提供本人 3 篇视频原稿，正文合计至少 300 字。
@@ -59,9 +59,9 @@ npm run web
 
 ## 隐私与数据边界
 
-- 所有数据保存在本机：SQLite数据库、运行资料、画像Git仓库，不连接任何第三方服务。
-- `.env`、登录会话与授权文件属于密钥材料，权限0600，不提交Git、不回显到前端。
-- 写作偏好与原稿按账号保存在本机`runtime/writing/`（0600），设篇数与字数上限。
+- SQLite 数据库、运行资料和画像的 Git 版本保存在本机。登录和采集会连接对应平台。
+- `.env`、登录会话与授权文件应保留在本机并排除在 Git 提交之外。登录会话和授权文件由本地程序读取。
+- 写作偏好与原稿按账号保存在本机 `runtime/writing/`，设篇数与字数上限。在支持 POSIX 权限的系统上，工作台将保存的会话和写作语料文件权限设为 `0600`。
 - 评估与稿件在对话中交付，工作台没有登记入口。
 - 界面时间按北京时间解释，数据库时间使用UTC。
 
