@@ -17,3 +17,8 @@ export function formatTime(value: TimeValue): string {
   const date = parseTime(value);
   return date ? formatter.format(date) : '—';
 }
+
+// 采集日与每日额度共用 UTC 换日，即北京时间 08:00。
+export const COLLECTION_DAY_MS = 86400000;
+export const collectionDay = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
+export const nextCollectionDay = (ms: number): number => (Math.floor(ms / COLLECTION_DAY_MS) + 1) * COLLECTION_DAY_MS;

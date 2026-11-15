@@ -2,7 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { upsertWork,upsertAuthor } from '../../lib/works.ts';
 import { linkWork, type AccountConfig } from '../../lib/accounts.ts';
 import { Discovery,normalize } from './discovery.ts';
-import type { CollectionStore } from './store.ts';
+import { taskTarget, type CollectionStore } from './store.ts';
 export function identity(store: CollectionStore,run: any,namespace: string,id: any,row: any={}) {
   if(!id)return;
   // Only an explicit sec_uid or profile link in the same response can connect ID namespaces.
@@ -22,27 +22,41 @@ export function identity(store: CollectionStore,run: any,namespace: string,id: a
     DO UPDATE SET author_id=COALESCE(excluded.author_id,collection_author_ids.author_id),evidence_run_id=excluded.evidence_run_id`)
     .run(namespace,String(id),author,run.id);
 }
-// Read only the latest response for each configured seed / selected topic.
-function captures(store: CollectionStore, accountId: number, type: string, targets: string[]): any[] {
-  if (!targets.length) return [];
+// 先选齐同一期的缓存，再加载响应正文。新一期未采齐时仍可展示上一期完整数据。
+function captures(store: CollectionStore, accountId: number, type: string, targets: string[], validDay: string | null) {
+  if (!targets.length) return { captures: [], pending: [], version: null };
   const rows = store.db.prepare(`SELECT * FROM (
-    SELECT r.*,ROW_NUMBER() OVER(PARTITION BY r.target ORDER BY r.id DESC) position,
-      (SELECT parameters FROM collection_requests q WHERE q.run_id=r.id AND q.status='ok' ORDER BY q.id DESC LIMIT 1) parameters
+    SELECT r.*,ROW_NUMBER() OVER(PARTITION BY r.target,r.version ORDER BY r.id DESC) position,
+      CASE WHEN r.operation='topic_search' THEN
+        (SELECT parameters FROM collection_requests q WHERE q.run_id=r.id AND q.status='ok' ORDER BY q.id DESC LIMIT 1)
+      END parameters
     FROM collection_runs r JOIN collection_run_accounts a ON a.run_id=r.id
     WHERE a.account_id=? AND r.provider='index' AND r.operation=? AND r.status='ok'
+      AND r.version IS NOT NULL AND (? IS NULL OR r.version<=?)
       AND r.target IN (${targets.map(() => '?').join(',')})
-  ) WHERE position=1`).all(accountId, type, ...targets) as any[];
-  return rows.map(run => {
-    const spec = JSON.parse(run.request), parameters = JSON.parse(run.parameters ?? '{}');
-    const range = parameters.body?.param ?? parameters.payload?.param;
-    let window: { begin?: string; end: string; days: number } | null = {end: run.version, days: spec.days ?? 7};
+  ) WHERE position=1 ORDER BY version DESC`).all(accountId, type, validDay, validDay, ...targets) as any[];
+  const byVersion = new Map<string, Map<string, any>>();
+  for (const run of rows) {
+    const spec = JSON.parse(run.request);
+    let window: { begin?: string; end: string; days: number } = {end: run.version, days: spec.days ?? 7};
     if (type === 'topic_search') {
+      const parameters = JSON.parse(run.parameters ?? '{}');
+      const range = parameters.body?.param ?? parameters.payload?.param;
       const ms = (value: any) => /^\d{8}$/.test(value ?? '') ? Date.parse(`${value.slice(0,4)}-${value.slice(4,6)}-${value.slice(6,8)}T00:00:00Z`) : NaN;
       const days = (ms(range?.end_date) - ms(range?.start_date)) / 86400000 + 1;
-      window = days === 30 && range.end_date === run.version ? {begin: range.start_date, end: range.end_date, days} : null;
+      if (days !== 30 || range.end_date !== run.version) continue;
+      window = {begin: range.start_date, end: range.end_date, days};
     }
-    return {type, id: spec.id, keyword: spec.keyword, days: spec.days, run, window, data: store.data(run)};
-  });
+    if (!byVersion.has(run.version)) byVersion.set(run.version, new Map());
+    byVersion.get(run.version)!.set(run.target, {type, keyword: spec.keyword, days: spec.days, run, window});
+  }
+  const current = byVersion.get(validDay ?? rows[0]?.version);
+  const complete = [...byVersion].find(([, batch]) => batch.size === targets.length);
+  return {
+    captures: complete ? [...complete[1].values()].map(capture => ({...capture, data: store.data(capture.run)})) : [],
+    pending: targets.filter(target => !current?.has(target)),
+    version: complete?.[0] ?? null,
+  };
 }
 export function collectionKeywords(db: DatabaseSync, accountId: number, tasks: AccountConfig['index']['tasks'] = []) {
   const configured = db.prepare(`SELECT source_key FROM account_sources
@@ -56,21 +70,16 @@ export function collectionKeywords(db: DatabaseSync, accountId: number, tasks: A
 
 export function indexSelection(store: CollectionStore, a: any): Discovery {
   const d = new Discovery(a.config.index.discovery ?? {}, collectionKeywords(store.db, a.id, a.config.index.tasks));
-  const topics=captures(store,a.id,'topic_search',d.keywords);
-  const dates=captures(store,a.id,'topic_dates',['topic_dates'])[0]?.data;
-  const end=dates?.valid_day??topics.filter((c: any)=>c.window).map((c: any)=>c.window.end).sort().at(-1);
-  const current=topics.filter((c: any)=>c.window&&c.window.end===end);
-  // Rank all configured seed queries in one window; never mix a new partial batch with old totals.
-  if(current.length===d.keywords.length)for(const capture of current)d.ingest(capture);
-  // 视频两窗口同等：每个关键词的近7天与近30天捕获都齐才算就绪。
-  const videoWindow=(days: number)=>captures(store,a.id,'videos',d.keywords.map(k=>`${k}#${days}`)).filter((c: any)=>c.run.version===end);
-  const v7=videoWindow(7),v30=videoWindow(30);
-  for(const capture of [...v7,...v30])d.ingest(capture);
-  d.ready=current.length===d.keywords.length&&v7.length===d.keywords.length&&v30.length===d.keywords.length;
-  d.pending={
-    topicSearch:d.keywords.filter(k=>!current.some((c: any)=>c.keyword===k)),
-    videos:d.keywords.filter(k=>!v7.some((c: any)=>c.keyword===k)||!v30.some((c: any)=>c.keyword===k)),
-  };
+  const dateRun = store.db.prepare(`SELECT r.* FROM collection_runs r JOIN collection_run_accounts x ON x.run_id=r.id
+    WHERE x.account_id=? AND r.provider='index' AND r.operation='topic_dates' AND r.status='ok' ORDER BY r.id DESC LIMIT 1`).get(a.id);
+  const validDay = dateRun ? store.data(dateRun).valid_day ?? null : null;
+  const specs = d.tasks();
+  const batch = (type: string) => captures(store, a.id, type, specs.filter(spec => spec.type === type).map(taskTarget), validDay);
+  const topics = batch('topic_search'), videos = batch('videos');
+  for (const capture of [...topics.captures, ...videos.captures]) d.ingest(capture);
+  d.ready = !topics.pending.length && !videos.pending.length;
+  d.pending = {topicSearch: topics.pending, videos: [...new Set(videos.pending.map(target => target.slice(0, target.lastIndexOf('#'))))]};
+  d.versions = {topics: topics.version, videos: videos.version};
   return d;
 }
 export function published(value: any): string {
@@ -110,7 +119,7 @@ export function rebuildAccount(store: CollectionStore, a: any): Discovery {
 // Keep internal capture references out of the API, otherwise each video repeats whole responses.
 export function selectionView(d: Discovery): any {
   const report=d.report();
-  return {...report,pending:d.pending,
+  return {...report,pending:d.pending,versions:d.versions,
     topics:report.topics.map(({id,name,index,window}:any)=>({id,name,index,window})),
     videos:report.videos.map(({sources,metric,...video}:any)=>({...video,sources:sources.map(({capture}:any)=>({runId:capture.run.id,type:capture.type,keyword:capture.keyword,topicId:capture.id,window:capture.window}))})),
   };

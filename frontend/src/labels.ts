@@ -1,5 +1,11 @@
+import type { ScheduleScope } from "../../lib/collection-schedule";
+
 /** 采集域共用文案：采集页(任务/次数上限)与设置·采集记录共用 */
 export const names: Record<string, string> = { index: "抖音指数", douyin: "抖音创作后台", xhs: "小红书创作服务", bili: "B站创作中心" };
+export const collectionNames: Record<ScheduleScope, string> = {
+  topic_rank: "话题榜", video_rank: "视频榜", author: "博主追踪",
+  index: names.index, douyin: names.douyin, xhs: names.xhs, bili: names.bili,
+};
 export const statuses: Record<string, string> = { ok: "完成", failed: "失败", cached: "复用缓存", running: "处理中", deferred: "已延后" };
 export const operations: Record<string, string> = {
   account_snapshot: "账号快照", topic_dates: "话题有效日期", topic_search: "话题搜索",

@@ -1,32 +1,29 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { formatTime } from './time.ts';
+import { COLLECTION_DAY_MS, collectionDay } from './time.ts';
 import { SNAPSHOT_PLATFORMS } from '../collector/sources/platform/snapshot.ts';
 import { connectionStatus } from './platform-login.ts';
 
-export interface SnapshotPoint { at: string; atMs: number; fans: number | null; likes: number | null; works: number | null; views: number | null }
+interface SnapshotPoint { at: string; fans: number | null; likes: number | null; works: number | null; views: number | null }
 
 const PROVIDERS = Object.keys(SNAPSHOT_PLATFORMS);
-const DAY = 86400000;
-
-// 数据监控载荷:各创作后台的最新快照、今日/近7天粉丝净增与近30天序列。
-// 观测按北京自然日取当日最新一条,升序返回供图表;净增从第二个快照起才有值。
-export function monitorOverview(db: DatabaseSync, accountId: number) {
-  const now = Date.now(), today = formatTime(now).slice(0, 10);
+// 趋势按同一快照版本取最后一次成功结果。
+export function monitorOverview(db: DatabaseSync, accountId: number, now = Date.now()) {
+  const today = collectionDay(now), weekAgo = collectionDay(now - 7 * COLLECTION_DAY_MS);
   const platforms: Record<string, any> = {};
   for (const provider of PROVIDERS) {
     const connection = connectionStatus(db, accountId, provider);
-    const rows = db.prepare(`SELECT r.observed_at,r.at_ms,o.metrics FROM collection_observations o
+    const rows = db.prepare(`SELECT r.version,r.at_ms,o.metrics FROM collection_observations o
       JOIN collection_runs r ON r.id=o.run_id JOIN collection_run_accounts x ON x.run_id=r.id
       WHERE x.account_id=? AND r.provider=? AND o.kind='account' AND r.status='ok'
-      ORDER BY r.at_ms DESC LIMIT 300`).all(accountId, provider) as any[];
+      ORDER BY r.at_ms DESC,r.id DESC LIMIT 300`).all(accountId, provider) as any[];
     const byDay = new Map<string, SnapshotPoint>();
     for (const row of rows) {
-      const atMs = Number(row.at_ms), day = formatTime(atMs).slice(0, 10);
-      if (!byDay.has(day)) byDay.set(day, { at: day, atMs, ...JSON.parse(row.metrics) });
+      const day = /^\d{4}-\d{2}-\d{2}$/.test(row.version ?? '') ? row.version : collectionDay(Number(row.at_ms));
+      if (!byDay.has(day)) byDay.set(day, { at: day, ...JSON.parse(row.metrics) });
     }
-    const series = [...byDay.values()].sort((a, b) => a.atMs - b.atMs).slice(-31);
+    const series = [...byDay.values()].sort((a, b) => a.at.localeCompare(b.at)).slice(-31);
     const latest = series.at(-1) ?? null;
-    const weekBase = [...series].reverse().find(p => p.atMs <= now - 7 * DAY) ?? (series.length > 1 ? series[0] : undefined);
+    const weekBase = [...series].reverse().find(p => p.at <= weekAgo) ?? (series.length > 1 ? series[0] : undefined);
     const diffFans = (base: SnapshotPoint | undefined): number | null => {
       const cur = latest?.fans, prev = base?.fans;
       return cur == null || prev == null ? null : cur - prev;

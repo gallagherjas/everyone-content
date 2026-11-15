@@ -3,29 +3,21 @@ import { useApi, fmtTime, type Account } from "../api";
 import { Badge, ConfirmBtn, Msg, Toggle, type BadgeTone } from "../components/Common";
 import { Page } from "../components/Layout";
 import PlatformAuthorization from "../components/PlatformAuthorization";
-import CollectionSchedule from "../components/CollectionSchedule";
+import CollectionSchedule, { type Budget } from "../components/CollectionSchedule";
+import CollectionControls from "../components/CollectionControls";
+import CollectionQueue from "../components/CollectionQueue";
+import type { CollectionTaskStatus } from "../../../collector/core/status";
 import ExcludeKeywords from "../components/ExcludeKeywords";
 import { names, operations, reason, statuses } from "../labels";
 import { useCachedLoad, useInvalidatePages, usePageVisible, KeepAlive } from "../components/PageCache";
 import Pager, { usePaged } from "../components/Pager";
 
 interface Run { id: number; provider: string; operation: string; target: string; status: string; observed_at: string; version: string | null; error: string | null }
-interface State { runs: Run[]; budgets: { provider: string; daily_limit: number; used: number }[]; credentials: Record<string, boolean>; queue: { total: number; due: number } }
-interface Progress { run_id: number | null; running: boolean; progress: number | null; status: string | null }
+interface State { tasks: CollectionTaskStatus[]; runs: Run[]; budgets: Budget[]; credentials: Record<string, boolean>; queue: { total: number; due: number }; discovery: { keywords: string[] } | null }
 interface Source { id: number; name: string }
-interface BloggerRow { id: number; kind: "blogger" | "blogger_search"; name: string; status: string; resolving?: boolean; options?: { core?: boolean; info?: boolean }; lastCollectAt?: string | null }
+interface BloggerRow { id: number; kind: "blogger" | "blogger_search"; name: string; status: string; userId?: string; resolving?: boolean; options?: { core?: boolean; info?: boolean }; lastCollectAt?: string | null }
 
 const RUN_TONE: Record<string, BadgeTone> = { ok: "up", failed: "danger", running: "warn", cached: "gray", deferred: "warn" };
-const OUTCOME: Record<string, string> = {
-  done: "采集完成，结果已更新。",
-  partial: "本轮部分采集失败。请在「日志」查看失败原因。",
-  failed: "本轮采集失败。请在「日志」查看失败原因。",
-  done_with_deferred: "本轮已有结果更新，部分任务延后。请在「日志」查看记录。",
-  deferred: "本轮任务延后。请在「日志」查看记录，等到可采时间后再试。",
-  cached: "已复用已有数据，本轮没有新增快照。",
-  empty: "本轮没有可执行的采集任务。",
-};
-
 /** 单个来源的今日额度卡：用量/上限 + 细进度条；未连接的来源弱化展示 */
 function BudgetCard({ label, used, limit, connected }: { label: string; used: number; limit: number; connected: boolean }) {
   const pct = Math.min(100, Math.round((used / Math.max(1, limit)) * 100));
@@ -41,12 +33,12 @@ export default function CollectPage({ current, onUpdate, jumpTo }: { current: Ac
   const [section, setSection] = useState("overview");
   // 提醒中的操作可以直接打开连接或日志。
   useEffect(() => { if (jumpTo?.section) setSection(jumpTo.section); }, [jumpTo]);
-  const [state, setState] = useState<State | null>(null), [percent, setPercent] = useState<number | null>(null);
+  const [state, setState] = useState<State | null>(null);
   const [src, setSrc] = useState<{ keywords: Source[] }>({ keywords: [] }), [keyword, setKeyword] = useState(""), [bloggerName, setBloggerName] = useState("");
   const [bloggers, setBloggers] = useState<BloggerRow[]>([]);
   const [runDetail, setRunDetail] = useState<{ id: number; text: string } | null>(null);
-  const [busy, setBusy] = useState(false), [failure, setFailure] = useState(false), [message, setMessage] = useState(""), [menuOpen, setMenuOpen] = useState(false);
-  const lastRuns = useRef<string | null>(null), activeRun = useRef<number | null>(null), menuRef = useRef<HTMLDivElement>(null);
+  const [busy, setBusy] = useState(false), [failure, setFailure] = useState(false), [message, setMessage] = useState("");
+  const lastRuns = useRef<string | null>(null);
 
   const load = useCallback(() => api<State>("/api/collection").then(value => {
     setState(value);
@@ -64,37 +56,7 @@ export default function CollectPage({ current, onUpdate, jumpTo }: { current: Ac
     const timer = setTimeout(loadBloggers, 3000);
     return () => clearTimeout(timer);
   }, [visible, bloggers, loadBloggers]);
-  // 采集进度轮询：完成后广播刷新各数据页，这里也是全工作台唯一的完成信号源。
-  useEffect(() => {
-    if (!visible) return; let alive = true;
-    const poll = () => {
-      const requested = activeRun.current;
-      const suffix = requested === null ? "" : `?run_id=${requested}`;
-      return api<Progress>(`/api/collection/progress${suffix}`).then(p => {
-        if (!alive || requested !== activeRun.current) return;
-        setPercent(p.running ? (p.progress ?? 0) : null);
-        if (p.running) activeRun.current = p.run_id;
-        else if (requested !== null) {
-          activeRun.current = null;
-          invalidate();
-          setFailure(p.status === "partial" || p.status === "failed");
-          setMessage(p.status ? OUTCOME[p.status] ?? "采集已结束。请查看日志确认结果。" : "采集已结束。请查看日志确认结果。");
-        }
-      }).catch(() => {});
-    };
-    poll();
-    const timer = setInterval(poll, 1500);
-    return () => { alive = false; clearInterval(timer); };
-  }, [visible, invalidate, api]);
   useEffect(() => { if (!visible) return; const timer = setInterval(load, 10000); return () => clearInterval(timer); }, [visible, load]);
-  // 采集范围下拉菜单：点击外部关闭。
-  useEffect(() => {
-    if (!menuOpen) return;
-    const close = (e: PointerEvent) => { if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false); };
-    document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
-  }, [menuOpen]);
-
   const action = async (fn: () => Promise<unknown>, text: string) => {
     if (busy) return; setBusy(true); setFailure(false); setMessage("");
     try { const value = await fn(); setMessage(typeof value === "string" ? value : text); }
@@ -110,20 +72,6 @@ export default function CollectPage({ current, onUpdate, jumpTo }: { current: Ac
     }, "已保存并重新筛选。");
   };
   const runPage = usePaged(state?.runs ?? []);
-  // 独立采集范围：指数两域与已连接平台；主按钮仍为全部采集。
-  const scopeItems = [
-    ...(state?.credentials?.index ? [{ key: "topic", label: "采集词（话题+视频）" }, { key: "author", label: "博主追踪" }] : []),
-    ...(["douyin", "xhs", "bili"] as const).filter(p => state?.credentials?.[p]).map(p => ({ key: p, label: names[p] })),
-  ];
-  const collect = async (only?: string) => {
-    if (busy) return;
-    setBusy(true); setFailure(false); setMessage("");
-    try {
-      const started = await api<{ run_id: number }>("/api/run/collect", { method: "POST", ...(only ? { body: JSON.stringify({ only }) } : {}) });
-      activeRun.current = started.run_id; setPercent(0);
-    } catch (e) { setFailure(true); setMessage(String(e)); }
-    finally { setMenuOpen(false); setBusy(false); }
-  };
   const tracked = bloggers.filter(b => b.kind === "blogger"), pending = bloggers.filter(b => b.kind === "blogger_search");
 
   return <Page head="采集" active={section} onPick={key => { setSection(key); setMessage(""); setRunDetail(null); }} items={[
@@ -132,44 +80,29 @@ export default function CollectPage({ current, onUpdate, jumpTo }: { current: Ac
     { key: "schedule", label: "定时" },
     { key: "keywords", label: "采集词" },
     { key: "bloggers", label: "博主" },
+    { key: "queue", label: "队列" },
     { key: "logs", label: "日志" },
   ]}>
     <div className="space-y-5">
       <KeepAlive active={section === "overview"}><section className="panel">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="font-semibold text-xl">采集总览</h2>
-            <p className="mt-1.5 text-sm text-muted" title="每日采集次数上限，跨账号共用；每天北京时间08:00重置">
-              队列 {state?.queue.total ?? '—'} 项 · 待执行 {state?.queue.due ?? '—'} 项；额度跨账号共用，每日 08:00 重置。
-            </p>
-          </div>
-          {percent === null
-            ? <div className="relative flex" ref={menuRef}>
-              <button className="btn-primary rounded-r-none" disabled={archived || busy} onClick={() => void collect()}>手动采集</button>
-              <button className="btn-primary rounded-l-none border-l border-brand/20 px-2" disabled={archived || busy || !scopeItems.length} aria-label="选择采集范围" aria-expanded={menuOpen}
-                onClick={() => setMenuOpen(v => !v)}><span className={`inline-block text-xs transition-transform ${menuOpen ? "rotate-180" : ""}`}>▾</span></button>
-              {menuOpen && <div className="absolute right-0 top-full z-20 mt-1 min-w-44 overflow-hidden rounded-xl border border-line bg-canvas py-1 shadow-lg">
-                {scopeItems.map(item => <button key={item.key} className="block w-full px-4 py-2 text-left text-sm hover:bg-brand/10" onClick={() => void collect(item.key)}>{item.label}</button>)}
-              </div>}
-            </div>
-            : <button className="btn-progress"><span className="absolute inset-0 flex items-center justify-center">{percent}%</span><span className="absolute inset-0 flex items-center justify-center bg-brand text-white transition-[clip-path] duration-500" style={{ clipPath: `inset(0 ${100 - percent}% 0 0)` }}>{percent}%</span></button>}
-        </div>
+        <h2 className="font-semibold text-xl">采集总览</h2>
+        <p className="mt-1.5 text-sm text-muted">额度跨账号共用，每日 08:00 重置。</p>
         <div className="mt-4 flex flex-wrap gap-2">
           {[...(state?.budgets ?? [])].sort((a, b) => (a.provider === 'index' ? 0 : 1) - (b.provider === 'index' ? 0 : 1))
             .map(b => <BudgetCard key={b.provider} label={names[b.provider] ?? b.provider} used={b.used} limit={b.daily_limit} connected={!!state?.credentials?.[b.provider]} />)}
         </div>
+        <CollectionControls archived={archived} credentials={state?.credentials}
+          hasKeywords={!!state?.discovery?.keywords.length} hasBloggers={bloggers.some(row => row.status === "ready")} />
       </section>
       <section className="panel">
         <h2 className="font-semibold text-xl">采集规则</h2>
-        <p className="mt-2 text-sm leading-6 text-brand">tips：了解规则前请先打开抖音指数了解其基本知识。</p>
-        <p className="mt-1 text-sm font-medium">采集按 关键词 → 话题 → 视频 → 达人 逐级发现：</p>
         <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-xs leading-6 text-muted">
-          <li>每个关键词搜索全部命中话题，以及近7天与近30天两个窗口的视频；不做数量与指数门槛限制。</li>
+          <li>话题榜与视频榜按采集词分别查询。视频采集近 7 天和近 30 天两个窗口，达人指数随视频榜更新。</li>
           <li>排除关键词全程生效：话题名称、视频标题或标签、达人昵称命中任一词即排除。</li>
           <li>页面按指数排名展示榜单：话题 Top20、视频 Top200（可切近7天/近30天口径与类型）、达人 Top10。</li>
           <li>博主走达友域单独采集：添加时搜索定位，此后每天一次作品榜，日增曲线与资料页按开关追加。</li>
         </ol>
-        <p className="mt-2 text-xs leading-6 text-muted">调整采集词与排除词即时生效，现有数据立即按新规则重新整理，无需重新采集。</p>
+        <p className="mt-2 text-xs leading-6 text-muted">删除采集词和调整排除词会重新筛选已有数据。新增采集词后，可在上方补采话题榜和视频榜。</p>
       </section></KeepAlive>
 
       <KeepAlive active={section === "keywords"}><section className="panel space-y-5">
@@ -227,6 +160,11 @@ export default function CollectPage({ current, onUpdate, jumpTo }: { current: Ac
         </div>}
       </section></KeepAlive>
 
+      <KeepAlive active={section === "queue"}>
+        <CollectionQueue tasks={state?.tasks} counts={state?.queue}
+          bloggerNames={new Map(tracked.filter(b => b.userId).map(b => [b.userId!, b.name]))} />
+      </KeepAlive>
+
       <KeepAlive active={section === "logs"}><section className="panel">
         <h2 className="font-semibold text-xl">采集日志</h2>
         <p className="mt-2 text-sm text-muted">时间均为北京时间。“查看记录”展示本次采集的入库数据。</p>
@@ -262,7 +200,7 @@ export default function CollectPage({ current, onUpdate, jumpTo }: { current: Ac
       </section></KeepAlive>
       <KeepAlive active={section === "schedule"}><section className="panel space-y-6">
         <h2 className="font-semibold text-xl">定时采集</h2>
-        <CollectionSchedule account={current} onSaved={onUpdate} />
+        <CollectionSchedule account={current} onSaved={onUpdate} budgets={state?.budgets} credentials={state?.credentials} />
       </section></KeepAlive>
 
       {message && <Msg tone={failure ? "error" : "ok"}><span className="block max-h-96 overflow-auto whitespace-pre-wrap break-all">{message}</span></Msg>}

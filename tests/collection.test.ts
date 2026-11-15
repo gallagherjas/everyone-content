@@ -16,6 +16,7 @@ const {planCollection}=await import('../collector/core/planner.ts');
 const {registerAuth,configureIndex}=await import('../collector/core/settings.ts');
 const {collectionStatus,collectionOutcome}=await import('../collector/core/status.ts');
 const {connectionStatus}=await import('../lib/platform-login.ts');
+const {monitorOverview}=await import('../lib/monitor.ts');
 const {bloggerOverview,bloggerDetail}=await import('../collector/core/bloggers.ts');
 const {defaultSchedules}=await import('../lib/collection-schedule.ts');
 const DAY=86400000,HOUR=3600000,base=Date.UTC(2026,10,7,2);
@@ -24,6 +25,39 @@ function account(db,id){const a=db.prepare('SELECT * FROM accounts WHERE id=?').
 function config(db,id,patch){const a=account(db,id);db.prepare('UPDATE accounts SET config=? WHERE id=?').run(JSON.stringify({...a.config,...patch}),id);}
 function auth(db,id,cookie){const file=join(root,`auth-${id}-${Math.random()}.json`);writeFileSync(file,JSON.stringify({cookie}),{mode:0o600});db.prepare('INSERT INTO collection_credentials VALUES(?,?,?,?)').run(id,'index',file,`account:${id}`);}
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json'}});
+test('队列列出全部账号任务，待执行计数与可执行状态一致',()=>{
+ const {db,store}=setup();try{
+  const later=Date.now()+HOUR;
+  const owners=[{id:1,configSha:'test'}];
+  const add=(keyword: string)=>store.queue('index','account:1',{type:'topic_search',keyword},owners);
+  for(let i=0;i<101;i++)add(`排队词${i}`);
+  const waiting=add('未到时间'),running=add('执行中'),disabled=add('已停用');
+  db.prepare('UPDATE collection_tasks SET next_run_at=? WHERE key=?').run(later,waiting.key);
+  const previous=store.begin(waiting,base);
+  store.finish(previous,{topic_list:[]},'20261105','test',()=>{},base+1000);
+  assert.equal(collectionStatus(db,account(db,1),null).tasks.find(task=>task.key===waiting.key)?.last_success_at,base+1000);
+  db.prepare('UPDATE collection_tasks SET last_success_at=NULL,last_success_id=NULL WHERE key=?').run(waiting.key);
+  db.prepare('UPDATE collection_tasks SET lease_until=? WHERE key=?').run(later,running.key);
+  db.prepare('UPDATE collection_tasks SET disabled=1 WHERE key=?').run(disabled.key);
+  const paused=store.queue('xhs','account:1',{type:'account_snapshot'},owners);
+  store.pause('xhs','account:1','login_required');
+  const second=createAccount(db,'第二个队列账号');
+  store.queue('index',`account:${second.id}`,{type:'topic_dates'},[{id:second.id,configSha:'test'}]);
+  const summary=collectionStatus(db,account(db,1),null);
+  assert.deepEqual(summary.queue,{total:105,due:101});
+  assert.equal(summary.tasks.length,summary.queue.total);
+  assert.equal(summary.tasks.filter(task=>task.status==='due').length,summary.queue.due);
+  const state=new Map(summary.tasks.map(task=>[task.key,task]));
+  assert.equal(state.get(waiting.key)?.status,'waiting');
+  assert.equal(state.get(waiting.key)?.last_success_at,base);
+  assert.equal(state.get(running.key)?.status,'running');
+  assert.equal(state.get(disabled.key)?.status,'disabled');
+  assert.equal(state.get(paused.key)?.status,'paused');
+  assert.equal(state.get(paused.key)?.source_error,'login_required');
+  assert.deepEqual(collectionStatus(db,second,null).queue,{total:1,due:1});
+  assert.deepEqual(collectionStatus(db,{...account(db,1),status:'archived'},null).queue,{total:105,due:0});
+ }finally{db.close();}
+});
 test('某账号登录失效不影响另一账号，同词查询与结果归属隔离',async()=>{
  const {db,store}=setup();try{
   const second=createAccount(db,'独立账号');
@@ -85,6 +119,78 @@ test('平台快照遇请求间隔即延后到窗口时刻，不占额度不睡�
   assert.equal(db.prepare("SELECT failures,error FROM collection_tasks WHERE provider='douyin'").get().failures,0);
  }finally{db.close();}
 });
+test('快照同一采集日复用，换日可重新采集，趋势与旧任务都按同一日界线',async()=>{
+ const {db,store}=setup();try{
+  const file=join(root,'daily-xhs.json');writeFileSync(file,JSON.stringify({cookie:'ok'}),{mode:0o600});
+  registerAuth(store,1,file,'xhs');
+  const cutoff=Date.UTC(2026,10,16), first=cutoff-12*HOUR;
+  let requests=0;
+  const opts={accountIds:[1],only:'xhs',fetchImpl:async()=>json({code:0,data:{fans_count:++requests}}),sleep:async()=>{}};
+  const task=()=>db.prepare("SELECT key,next_run_at FROM collection_tasks WHERE provider='xhs'").get()!;
+  assert.equal((await runCollection(store,{...opts,clock:()=>first})).completed,1);
+  assert.equal(task().next_run_at,cutoff);
+  db.prepare('UPDATE collection_tasks SET next_run_at=? WHERE key=?').run(first+DAY,task().key);
+  db.exec('PRAGMA user_version=5');
+  migrate(db,':memory:');
+  assert.equal(task().next_run_at,cutoff);
+  const sameDay=await runCollection(store,{...opts,clock:()=>cutoff-HOUR-1});
+  assert.equal(collectionOutcome(sameDay.accounts[1]),'cached');
+  assert.equal(requests,1);
+  assert.equal(task().next_run_at,cutoff);
+
+  registerAuth(store,1,file,'xhs');
+  assert.equal((await runCollection(store,{...opts,clock:()=>cutoff-HOUR})).completed,1);
+  const cached=monitorOverview(db,1,cutoff-1).platforms.xhs;
+  assert.deepEqual(cached.series.map(point=>[point.at,point.fans]),[['2026-11-15',2]]);
+  assert.equal((await runCollection(store,{...opts,clock:()=>cutoff})).completed,1);
+  assert.equal(requests,3);
+  assert.equal(task().next_run_at,cutoff+DAY);
+  assert.deepEqual(monitorOverview(db,1,cutoff).platforms.xhs.series.map(point=>[point.at,point.fans]),
+    [['2026-11-15',2],['2026-11-16',3]]);
+ }finally{db.close();}
+});
+test('跨采集日收到快照时从新的一天复用缓存',async()=>{
+ const {db,store}=setup();try{
+  const file=join(root,'midnight-xhs.json');writeFileSync(file,JSON.stringify({cookie:'ok'}),{mode:0o600});
+  registerAuth(store,1,file,'xhs');
+  const cutoff=Date.UTC(2026,10,16);
+  let now=cutoff-1000;
+  const opts={accountIds:[1],only:'xhs',clock:()=>now,sleep:async()=>{},
+    fetchImpl:async()=>{now=cutoff+1000;return json({code:0,data:{fans_count:3}});}};
+  assert.equal((await runCollection(store,opts)).completed,1);
+  const task=db.prepare("SELECT key,next_run_at FROM collection_tasks WHERE provider='xhs'").get()!;
+  assert.equal(store.latest(String(task.key)).version,'2026-11-16');
+  assert.equal(task.next_run_at,cutoff+DAY);
+  const cached=await runCollection(store,{...opts,fetchImpl:()=>assert.fail('应复用新采集日的快照')});
+  assert.equal(collectionOutcome(cached.accounts[1]),'cached');
+ }finally{db.close();}
+});
+test('B站总览单请求采集，未登录时提示重连，成功后同日复用并在换日后更新',async()=>{
+ const {db,store}=setup();try{
+  const file=join(root,'bili-test.json');writeFileSync(file,JSON.stringify({cookie:'SESSDATA=synthetic'}),{mode:0o600});
+  registerAuth(store,1,file,'bili');
+  let now=base,calls=0;
+  const opts={accountIds:[1],only:'bili',clock:()=>now,sleep:async()=>{}};
+  const snapshot=async(input: RequestInfo | URL)=>{
+   assert.equal(String(input),'https://member.bilibili.com/x/web/data/index/stat?tmid=-1');
+   calls++;
+   return calls===1?json({code:-101,message:'账号未登录'}):json({code:0,data:{total_fans:4,total_like:9,total_click:'1.2亿'}});
+  };
+  assert.equal((await runCollection(store,{...opts,fetchImpl:snapshot})).failed,1);
+  assert.equal(connectionStatus(db,1,'bili').status,'expired');
+  assert.equal(collectionStatus(db,account(db,1),store).runs[0].error,'login_required');
+  registerAuth(store,1,file,'bili');now+=1000;
+  assert.equal((await runCollection(store,{...opts,fetchImpl:snapshot})).completed,1);
+  const monitor=monitorOverview(db,1,now).platforms.bili;
+  assert.deepEqual(monitor.latest,{at:'2026-11-07',fans:4,likes:9,views:120000000,works:null});
+  assert.equal(calls,2);
+  assert.equal((await runCollection(store,{...opts,fetchImpl:snapshot})).cached,1);
+  assert.equal(calls,2);
+  now=Date.UTC(2026,10,8);
+  assert.equal((await runCollection(store,{...opts,fetchImpl:snapshot})).completed,1);
+  assert.equal(calls,3);
+ }finally{db.close();}
+});
 test('重连同日仍实采验证，未登录响应暂停对应来源，其他平台可正常完成',async()=>{
   const {db,store}=setup();
   try {
@@ -136,14 +242,14 @@ test('未登记授权不排指数任务也不伪造失败；登记后立即参�
 });
 test('30天窗口有效版本跨日更新，合法空结果缓存，旧累计缓存不复用',async()=>{
  const {db,store}=setup();try{
-  config(db,1,{index:{discovery:null,tasks:[{type:'topic_search',keyword:'测试'}]}});auth(db,1,'valid');let version='20261105',now=base,business=0;
+  config(db,1,{index:{discovery:null,tasks:[{type:'topic_search',keyword:'测试'}]}});auth(db,1,'valid');let version='20261105',now=base+8*HOUR,business=0;
   const fetchImpl=async(input,init)=>{const p=new URL(String(input)).pathname;if(p.endsWith('get_topic_valid_date'))return json({data:{valid_day:version,valid_week:'20261101'}});business++;const payload=JSON.parse(init.body);if(p.endsWith('query_topic')){assert.ok(payload.param.start_date);return json({data:{topic_list:[]}});}return json({data:{data:[]}});};
   const legacy=store.queue('index','account:1',{type:'topic_search',keyword:'测试'},[{id:1,configSha:'legacy'}]);
   store.claim(legacy,base-DAY);const old=store.begin(legacy,base-DAY);
   const slot=store.reserve(old,'/api/v2/index/query_topic',base-DAY,null,{body:{param:{start_date:'',end_date:version}}});
   store.requestResult(slot.id,'{}',200);store.finish(old,{topic_list:[{topic_id:'99',topic_name:'累计旧话题',topic_index:'999999'}]},version,'legacy',()=>{},base-DAY);store.release(legacy,base+DAY);
   const opts={accountIds:[1],only:'index',clock:()=>now,fetchImpl,sleep:async()=>{}};await runCollection(store,opts);assert.equal(business,3); // topic + two video windows, all legitimately empty
-  now+=DAY+1;version='20261106';await runCollection(store,opts);assert.equal(business,6);
+  now=base+22*HOUR;version='20261106';await runCollection(store,opts);assert.equal(business,6);
   now+=DAY+1;await runCollection(store,opts);assert.equal(business,6);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM collection_observations WHERE kind='topic'").get().n,0);
  }finally{db.close();}
@@ -352,5 +458,59 @@ test('手动采集按范围独立：topic 只跑话题域，author 只跑达友�
   const topic=await runCollection(store,{accountIds:[1],only:'topic',clock:()=>base+DAY+60000,fetchImpl,sleep:async()=>{}});
   assert.equal(topic.failed,0);assert.equal(topic.completed,4); // topic_dates + topic_search + 两个视频窗口
   assert.equal(calls.filter(p=>TOPIC.includes(p)).length,4);assert.equal(calls.filter(p=>AUTHOR.includes(p)).length,0);
+ }finally{db.close();}
+});
+test('话题和视频独立采集有效期，达人跟随视频，定时只执行启用的范围',async()=>{
+ const {db,store}=setup();try{
+  db.prepare("INSERT INTO account_sources(account_id,kind,source_key,name) VALUES(1,'keyword','独立榜单','独立榜单')").run();
+  auth(db,1,'valid');
+  const schedules=account(db,1).config.schedules;
+  config(db,1,{schedules:{...schedules,video_rank:{...schedules.video_rank,enabled:true}}});
+  let now=base,version='20261105';
+  const calls:string[]=[];
+  const fetchImpl=async(input:any)=>{
+   const endpoint=new URL(String(input)).pathname.split('/').pop()!;
+   calls.push(endpoint);
+   if(endpoint==='get_topic_valid_date')return json({data:{valid_day:version,valid_week:'20261101'}});
+   if(endpoint==='query_topic')return json({data:{topic_list:[{topic_id:'77',topic_name:'测试话题',topic_index:'100'}]}});
+   if(endpoint==='itemQuery')return json({data:{data:[{itemId:'123',title:'测试视频',likes:'600',index:'1000',nickname:'测试作者'}]}});
+   throw new Error('unexpected endpoint');
+  };
+  const opts={accountIds:[1],clock:()=>now,fetchImpl,sleep:async()=>{}};
+  const read=()=>collectionStatus(db,account(db,1),store).discovery;
+
+  await runCollection(store,{...opts,only:'topic_rank',scheduled:true});
+  assert.deepEqual(calls,[]);
+  await runCollection(store,{...opts,only:'topic_rank'});
+  assert.deepEqual(calls,['get_topic_valid_date','query_topic']);
+  assert.deepEqual(read().versions,{topics:version,videos:null});
+  assert.equal(read().topics.length,1);
+  assert.equal(read().videos.length,0);
+  calls.length=0;
+  await runCollection(store,{...opts,only:'video_rank',scheduled:true});
+  assert.deepEqual(calls,['itemQuery','itemQuery']);
+  assert.deepEqual(read().versions,{topics:version,videos:version});
+  assert.equal(read().authors[0].name,'测试作者');
+
+  now+=DAY+1000;version='20261106';calls.length=0;
+  await runCollection(store,{...opts,only:'topic_rank'});
+  assert.deepEqual(calls,['get_topic_valid_date','query_topic']);
+  assert.deepEqual(read().versions,{topics:version,videos:'20261105'});
+  assert.deepEqual(read().pending.videos,['独立榜单']);
+  assert.equal(read().authors[0].name,'测试作者');
+  calls.length=0;
+  await runCollection(store,{...opts,only:'video_rank',scheduled:true});
+  assert.deepEqual(calls,['itemQuery','itemQuery']);
+  assert.deepEqual(read().versions,{topics:version,videos:version});
+  assert.deepEqual(read().pending.videos,[]);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM collection_requests WHERE provider='index'").get().n,8);
+
+  now+=DAY+1000;version='20261107';calls.length=0;
+  await runCollection(store,{...opts,only:'video_rank',scheduled:true});
+  assert.deepEqual(calls,['get_topic_valid_date','itemQuery','itemQuery']);
+  assert.deepEqual(read().versions,{topics:'20261106',videos:version});
+  assert.deepEqual(read().pending.topicSearch,['独立榜单']);
+  assert.equal(read().videos.length,1);
+  assert.equal(read().authors[0].name,'测试作者');
  }finally{db.close();}
 });

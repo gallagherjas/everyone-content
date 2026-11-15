@@ -1,10 +1,11 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
+import { nextCollectionDay } from '../lib/time.ts';
 
 export function migrate(db: DatabaseSync, _filename: string) {
   const version = Number(db.prepare('PRAGMA user_version').get()?.user_version);
-  if (version === 5) return;
-  if (![0, 1, 2, 3, 4].includes(version)) throw new Error('数据库版本不兼容，请使用本项目的数据目录');
+  if (version === 6) return;
+  if (![0, 1, 2, 3, 4, 5].includes(version)) throw new Error('数据库版本不兼容，请使用本项目的数据目录');
   db.exec('PRAGMA journal_mode=WAL; BEGIN IMMEDIATE');
   try {
     // v4 及更早：跑基线建表并逐步升到 v4；v4 库只需追平 v5，避免重复执行 v3/v4 重建。
@@ -91,7 +92,7 @@ export function migrate(db: DatabaseSync, _filename: string) {
       CREATE INDEX IF NOT EXISTS collection_budget ON collection_requests(provider,day);`);
     }
     // v5：博主链路回归——kind 放开到 keyword/blogger/blogger_search，新增 options 存每博主采集开关。
-    db.exec(`CREATE TABLE account_sources_v5 (
+    if (version < 5) db.exec(`CREATE TABLE account_sources_v5 (
       id INTEGER PRIMARY KEY,
       account_id INTEGER NOT NULL REFERENCES accounts(id),
       kind TEXT NOT NULL CHECK(kind IN ('keyword','blogger','blogger_search')),
@@ -105,7 +106,21 @@ export function migrate(db: DatabaseSync, _filename: string) {
     INSERT INTO account_sources_v5 SELECT id,account_id,kind,source_key,name,status,note,'' FROM account_sources;
     DROP TABLE account_sources;
     ALTER TABLE account_sources_v5 RENAME TO account_sources;`);
-    db.exec('PRAGMA user_version=5; COMMIT');
+    // v6：成功后的滚动等待缩短至采集日边界，保留已经安排的提前复查和失败退避。
+    const successful = db.prepare(`SELECT t.key,t.provider,r.at_ms,r.version FROM collection_tasks t
+      JOIN collection_runs r ON r.id=t.last_success_id AND r.task_key=t.key
+      WHERE t.disabled=0 AND t.error IS NULL AND t.lease_until<=? AND r.status='ok'`).all(Date.now());
+    const reschedule = db.prepare('UPDATE collection_tasks SET next_run_at=? WHERE key=? AND next_run_at>?');
+    for (const row of successful) {
+      const version = String(row.version ?? '');
+      const at = row.provider !== 'index' && /^\d{4}-\d{2}-\d{2}$/.test(version)
+        ? Date.parse(version) : Number(row.at_ms);
+      if (Number.isFinite(at)) {
+        const next = nextCollectionDay(at);
+        reschedule.run(next,row.key,next);
+      }
+    }
+    db.exec('PRAGMA user_version=6; COMMIT');
   } catch (error) {
     db.exec('ROLLBACK');
     throw error;

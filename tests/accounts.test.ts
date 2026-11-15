@@ -120,6 +120,13 @@ test('账号隔离、画像生效与指数配置可通过本地API完成', async
     await request(`/api/sources/${addedSource.id}`, second.id, 'DELETE');
     assert.deepEqual((await request('/api/sources', second.id)).keywords, []);
     assert.deepEqual((await request('/api/collection/config', second.id)).config.index.tasks, legacyTasks.slice(1));
+    const videoSchedule = { enabled: true, times: ['10:20'], request_limit: 4 };
+    const topicSchedule = { enabled: true, times: ['11:00'], request_limit: 2 };
+    await request('/api/collection/config', second.id, 'PUT', { schedules: { video_rank: videoSchedule } });
+    const configured = await request('/api/collection/config', second.id, 'PUT', { schedules: { topic_rank: topicSchedule } });
+    assert.deepEqual(configured.config.schedules.video_rank, videoSchedule);
+    assert.deepEqual(configured.config.schedules.topic_rank, topicSchedule);
+    assert.equal(configured.config.schedules.author.enabled, false);
     const collection = await request('/api/collection', second.id);
     assert.deepEqual(collection.credentials, {});
     assert.equal(collection.discovery, null);

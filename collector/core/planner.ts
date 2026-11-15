@@ -4,11 +4,12 @@ import { rebuildAccount } from './projection.ts';
 import { normalize,count } from './discovery.ts';
 import { projectBloggers } from './bloggers.ts';
 
-const DAY=86400000;
-export interface PlanOptions { accountIds?: number[]; scheduled?: boolean; now?: number }
-export function collectionAccounts(db: DatabaseSync,{accountIds,scheduled=false}:{accountIds?: number[];scheduled?: boolean}={}): any[] {
+export interface PlanOptions { accountIds?: number[]; scheduled?: boolean; only?: string; now?: number }
+export function collectionAccounts(db: DatabaseSync,{accountIds,scheduled=false,only}:PlanOptions={}): any[] {
   return (db.prepare("SELECT * FROM accounts WHERE status='active' ORDER BY id").all() as any[]).map(a=>({...a,config:JSON.parse(a.config)}))
-    .filter(a=>(!accountIds||accountIds.includes(a.id))&&(!scheduled||Object.values<any>(a.config.schedules).some(s=>s.enabled)))
+    .filter(a=>(!accountIds||accountIds.includes(a.id))&&(!scheduled||(only
+      ? a.config.schedules?.[only==='topic'?'index':only]?.enabled
+      : Object.values<any>(a.config.schedules??{}).some(s=>s.enabled))))
     .map(a=>({...a,configSha:hash({index:a.config.index,strategy:a.strategy_sha})}));
 }
 export function bloggerOptions(raw: any): { core: boolean; info: boolean } {
@@ -38,38 +39,38 @@ function resolveSearches(db: DatabaseSync, a: any, scope: string, store: Collect
 }
 export function planCollection(store: CollectionStore,options: PlanOptions={}): any[] {
   const db=store.db,now=options.now??Date.now(),accounts=collectionAccounts(db,options);
+  const advanceVersion = (task: {key: string; error: string | null},version?: string) => {
+    const previous = version && !task.error ? store.latest(task.key) : null;
+    if(previous && previous.version!==version)
+      db.prepare('UPDATE collection_tasks SET next_run_at=MIN(next_run_at,?) WHERE key=?').run(now,task.key);
+  };
   atomic(db,()=>{
     for(const a of accounts) {
       db.prepare('DELETE FROM collection_task_accounts WHERE account_id=?').run(a.id);
       const cred=db.prepare('SELECT * FROM collection_credentials WHERE account_id=? AND provider=?').get(a.id,'index') as any;
       if(cred) {
         const discovery=rebuildAccount(store,a);
-        const datesRun=store.latest(store.queue('index',cred.scope,{type:'topic_dates'},[a],{interval:DAY,priority:100}).key);
+        const datesRun=store.latest(store.queue('index',cred.scope,{type:'topic_dates'},[a],{priority:100}).key);
         const dates=datesRun?store.data(datesRun):null;
         for(const spec of discovery.tasks()) {
-          const task=store.queue('index',cred.scope,spec,[a],{interval:DAY,priority:spec.type==='topic_search'?30:spec.type==='videos'?20:10});
-          const version=spec.type==='topic_relation'?dates?.valid_week:dates?.valid_day;
-          const previous=store.latest(task.key);
-          if(version&&previous&&previous.version!==version&&!task.error)
-            db.prepare('UPDATE collection_tasks SET next_run_at=MIN(next_run_at,?) WHERE key=?').run(now,task.key);
+          const task=store.queue('index',cred.scope,spec,[a],{priority:spec.type==='topic_search'?30:spec.type==='videos'?20:10});
+          advanceVersion(task,spec.type==='topic_relation'?dates?.valid_week:dates?.valid_day);
         }
         // 博主链路：先解析待搜索昵称，再按开关排任务；有博主才排达友域日期任务，避免空转额度。
         resolveSearches(db,a,cred.scope,store);
         const bloggers=db.prepare("SELECT * FROM account_sources WHERE account_id=? AND kind='blogger'").all(a.id) as any[];
         const pending=db.prepare("SELECT * FROM account_sources WHERE account_id=? AND kind='blogger_search' AND status='ready'").all(a.id) as any[];
         if(bloggers.length||pending.length){
-          const authorDatesRun=store.latest(store.queue('index',cred.scope,{type:'author_dates'},[a],{interval:DAY,priority:100}).key);
+          const authorDatesRun=store.latest(store.queue('index',cred.scope,{type:'author_dates'},[a],{priority:100}).key);
           const authorDates=authorDatesRun?store.data(authorDatesRun):null;
           for(const s of pending)
-            store.queue('index',cred.scope,{type:'author_search',keyword:s.source_key},[a],{interval:DAY,priority:40});
+            store.queue('index',cred.scope,{type:'author_search',keyword:s.source_key},[a],{priority:40});
           for(const s of bloggers.filter(s=>s.status==='ready')){
             const opt=bloggerOptions(s.options);
             for(const [type,on] of [['author_works',true],['author_core',opt.core],['author_info',opt.info]] as const){
               if(!on)continue;
-              const task=store.queue('index',cred.scope,{type,id:s.source_key},[a],{interval:DAY,priority:15});
-              const previous=store.latest(task.key);
-              if(authorDates?.datetime&&previous&&previous.version!==authorDates.datetime&&!task.error)
-                db.prepare('UPDATE collection_tasks SET next_run_at=MIN(next_run_at,?) WHERE key=?').run(now,task.key);
+              const task=store.queue('index',cred.scope,{type,id:s.source_key},[a],{priority:15});
+              advanceVersion(task,authorDates?.datetime);
             }
           }
           projectBloggers(store,a,cred.scope);
@@ -78,7 +79,7 @@ export function planCollection(store: CollectionStore,options: PlanOptions={}): 
       // 创作后台快照:各平台独立凭证,登记了哪个平台就排哪个,每天一次账号级快照。
       for(const provider of ['douyin','xhs','bili']) {
         const platform=db.prepare('SELECT * FROM collection_credentials WHERE account_id=? AND provider=?').get(a.id,provider) as any;
-        if(platform)store.queue(provider,platform.scope,{type:'account_snapshot'},[a],{interval:DAY,priority:50});
+        if(platform)store.queue(provider,platform.scope,{type:'account_snapshot'},[a],{priority:50});
       }
     }
   });

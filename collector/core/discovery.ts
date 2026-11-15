@@ -37,6 +37,7 @@ export class Discovery {
   // 由投影层在汇总就绪度后写入；未写入时视为未就绪。
   ready?: boolean;
   pending?: { topicSearch: string[]; videos: string[] };
+  versions?: { topics: string | null; videos: string | null };
   constructor(policy: any, keywords: string[] = []) {
     this.policy = collectionPolicy(policy);
     this.keywords = unique(keywords.map(v => v.trim()).filter(Boolean));
@@ -112,7 +113,7 @@ export class Discovery {
     }
     const selectedAuthors = [...authors.values()].sort((a, b) => b.totalIndex - a.totalIndex || a.key.localeCompare(b.key));
     const ready=this.ready!==false;
-    return {ready,keywords: this.keywords, topics: selectedTopics, videos:ready?videos:[], authors:ready?selectedAuthors:[],
+    return {ready,keywords: this.keywords, topics: selectedTopics, videos, authors:selectedAuthors,
       counts: {receivedVideos: received, uniqueVideos: merged.size, excludedKeywords: excludedByKeywords}, policy: this.policy};
   }
 }

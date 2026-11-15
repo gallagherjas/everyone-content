@@ -3,12 +3,27 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import type { DatabaseSync } from 'node:sqlite';
+import { COLLECTION_PROVIDERS, SCHEDULE_SCOPES, type CollectionSchedules } from '../../lib/collection-schedule.ts';
+import { COLLECTION_DAY_MS, collectionDay } from '../../lib/time.ts';
 
-export const PROVIDERS = ['index', 'douyin', 'xhs', 'bili'];
-// 采集范围在来源之上把指数拆为话题域与达友域，供手动采集独立触发。
-export const SCOPES = ['index', 'topic', 'author', 'douyin', 'xhs', 'bili'];
-export const taskScope = (task: { provider: string; operation: string }): string =>
-  task.provider !== 'index' ? task.provider : task.operation.startsWith('author_') ? 'author' : 'topic';
+export const PROVIDERS: readonly string[] = COLLECTION_PROVIDERS;
+interface ScopedTask { provider: string; operation: string }
+export function taskInScope(task: ScopedTask, scope?: string): boolean {
+  if (!scope) return true;
+  if (task.provider !== 'index') return task.provider === scope;
+  const tracking = task.operation.startsWith('author_');
+  switch (scope) {
+    case 'index': return true;
+    case 'topic': return !tracking; // 旧 CLI/API 的关键词合并范围。
+    case 'author': return tracking;
+    case 'topic_rank': return task.operation.startsWith('topic_');
+    case 'video_rank': return task.operation === 'topic_dates' || task.operation === 'videos';
+    default: return false;
+  }
+}
+export function scheduledTaskEnabled(schedules: CollectionSchedules | undefined, task: ScopedTask) {
+  return SCHEDULE_SCOPES.some(key => schedules?.[key]?.enabled && taskInScope(task, key));
+}
 export const hash = (value: any): string => createHash('sha256').update(typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(value)).digest('hex');
 export const stamp = (ms: number): string => new Date(ms).toISOString().slice(0,19).replace('T',' ');
 export const taskKey = (provider: string,scope: string,spec: any): string => hash({provider,scope,type:spec.type,id:spec.id??null,keyword:spec.keyword??null,
@@ -37,19 +52,29 @@ export class CollectionStore {
     const bytes=gunzipSync(readFileSync(path));if(hash(bytes)!==sha)throw new Error('artifact_checksum_mismatch');return bytes.toString('utf8');
   }
   data(run: any): any { return JSON.parse(this.read(run.data_path,run.data_sha)); }
-  queue(provider: string,scope: string,spec: any,accounts: {id: number; configSha: string}[],{interval=86400000,priority=1}:{interval?: number;priority?: number}={}) {
+  queue(provider: string,scope: string,spec: any,accounts: {id: number; configSha: string}[],{priority=1}:{priority?: number}={}) {
     if(!PROVIDERS.includes(provider))throw new Error('未知采集来源');
     const key=taskKey(provider,scope,spec),target=taskTarget(spec);
     this.db.prepare(`INSERT INTO collection_tasks(key,provider,scope,operation,target,spec,priority,interval_ms)
-      VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET spec=excluded.spec,priority=excluded.priority,
-      next_run_at=CASE WHEN collection_tasks.interval_ms<>excluded.interval_ms AND collection_tasks.last_success_at IS NOT NULL AND collection_tasks.failures=0
-        THEN collection_tasks.last_success_at+excluded.interval_ms ELSE collection_tasks.next_run_at END,
-      interval_ms=excluded.interval_ms`).run(key,provider,scope,spec.type,target,JSON.stringify(spec),priority,interval);
+      VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET spec=excluded.spec,priority=excluded.priority`)
+      .run(key,provider,scope,spec.type,target,JSON.stringify(spec),priority,COLLECTION_DAY_MS);
     for(const a of accounts)this.db.prepare(`INSERT INTO collection_task_accounts VALUES(?,?,?)
       ON CONFLICT(task_key,account_id) DO UPDATE SET config_sha=excluded.config_sha`).run(key,a.id,a.configSha);
     return this.db.prepare('SELECT * FROM collection_tasks WHERE key=?').get(key) as any;
   }
   latest(key: string): any { return this.db.prepare("SELECT * FROM collection_runs WHERE task_key=? AND status='ok' ORDER BY id DESC LIMIT 1").get(key) as any; }
+  freshSnapshot(accountId: number, provider: string, now: number) {
+    return this.db.prepare(`SELECT t.*,r.id previous_id,r.version FROM collection_tasks t
+      JOIN collection_task_accounts x ON x.task_key=t.key
+      JOIN collection_runs r ON r.id=t.last_success_id AND r.task_key=t.key
+      JOIN collection_run_accounts a ON a.run_id=r.id AND a.account_id=x.account_id
+      LEFT JOIN collection_provider_state p ON p.provider=t.provider AND p.scope=t.scope
+      WHERE x.account_id=? AND t.provider=? AND t.operation='account_snapshot' AND t.next_run_at>?
+        AND t.lease_until<=? AND t.disabled=0 AND t.error IS NULL AND COALESCE(p.paused,0)=0
+        AND t.last_success_at IS NOT NULL AND r.status='ok' AND r.version=?`)
+      .get(accountId,provider,now,now,collectionDay(now)) as
+        (Record<string, any> & { key: string; previous_id: number; version: string }) | undefined;
+  }
   accounts(key: string): any[] { return this.db.prepare('SELECT a.*,ta.config_sha FROM collection_task_accounts ta JOIN accounts a ON a.id=ta.account_id WHERE task_key=? AND a.status=\'active\'').all(key) as any[]; }
   dueTasks(accountIds: number[],now=Date.now()): any[] {
     if(!accountIds.length)return [];
@@ -73,6 +98,13 @@ export class CollectionStore {
       this.db.prepare('INSERT INTO collection_run_accounts VALUES(?,?,?)').run(id,a.id,a.config_sha);
     return this.db.prepare('SELECT * FROM collection_runs WHERE id=?').get(id) as any;
   }
+  reuse(runId: number, previousId: number, version: string): void {
+    atomic(this.db,()=>{
+      this.db.prepare("UPDATE collection_runs SET status='cached',version=? WHERE id=?").run(version,runId);
+      this.db.prepare(`INSERT OR IGNORE INTO collection_run_accounts
+        SELECT ?,account_id,config_sha FROM collection_run_accounts WHERE run_id=?`).run(previousId,runId);
+    });
+  }
   reserve(run: any,endpoint: string,now=Date.now(),sourceKey: string | null=null,parameters: Record<string, unknown>={}): {id: number; wait: number} {
     return atomic(this.db,()=>{
       const limit=this.db.prepare('SELECT * FROM collection_limits WHERE provider=?').get(run.provider) as any;
@@ -82,7 +114,7 @@ export class CollectionStore {
       const at=sourceKey?now:Math.max(now,previous+limit.interval_ms);
       // 距离允许的请求窗口还很久时不占额度不占锁,任务延后到窗口时刻,由下一次采集触发;避免进程内长睡冻结进度并独占采集资源。
       if(!sourceKey&&at-now>600000)throw new Error(`interval_pending ${at}`);
-      const day=new Date(at).toISOString().slice(0,10);
+      const day=collectionDay(at);
       const used=(this.db.prepare('SELECT COUNT(*) n FROM collection_requests WHERE provider=? AND day=?').get(run.provider,day) as any).n;
       if(used>=limit.daily_limit)throw new Error('daily_budget_exhausted');
       const id=Number(this.db.prepare('INSERT INTO collection_requests(run_id,provider,scope,day,at_ms,endpoint,source_key,parameters) VALUES(?,?,?,?,?,?,?,?)')

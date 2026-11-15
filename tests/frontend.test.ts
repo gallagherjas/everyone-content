@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { defaultSchedules } from '../lib/collection-schedule.ts';
 
 // Exercise React with a simulated DOM; no browser or live business API is used.
 test('首个账号由用户创建；页面缓存保留编辑状态，切换账号时隔离且隐藏时停止轮询', async () => {
@@ -37,7 +38,7 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     collection.set(++timerId, () => callback(...args)); return timerId;
   });
   replace('clearInterval', id => { if (!timers.delete(id) && !noticeTimers.delete(id) && !progressTimers.delete(id)) originalClear(id); });
-  const config = { schedules: Object.fromEntries(['index', 'douyin', 'xhs', 'bili'].map(provider => [provider, { enabled: false, times: ['10:00'], request_limit: 10 }])), index: { discovery: null, tasks: [] } };
+  const config = { schedules: defaultSchedules(), index: { discovery: null, tasks: [] } };
   const accounts = [];
   const requests = [], runs = [], bloggers = [], sources = [];
   let manualOutcome = null;
@@ -46,11 +47,12 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
   const monitorData = { platforms: { douyin: emptyPlatform(), xhs: emptyPlatform(), bili: emptyPlatform() }, total: { fans: 0, deltaToday: null, delta7d: null, platforms: 0 } };
   replace('fetch', async (input, init = {}) => {
     const url = new URL(String(input), window.location.href), account = Number(init.headers?.['x-everyone-content-account'] ?? 0), method = init.method ?? 'GET';
-    requests.push({ url, account, method });
+    const body = init.body ? JSON.parse(init.body) : undefined;
+    requests.push({ url, account, method, body });
     let data;
     if (url.pathname === '/api/accounts' && method === 'POST') {
       data = { id: accounts.length + 1, name: JSON.parse(init.body).name, profile_url: '', platform: 'douyin', status: 'active', strategy_sha: null, config };
-      accounts.push(data);
+      accounts.push(structuredClone(data));
     }
     else if (url.pathname === '/api/accounts') data = accounts;
     else if (url.pathname === '/api/collection') {
@@ -58,10 +60,17 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
       const excluded = accounts.find(a => a.id === account)?.config.index.discovery?.excludeKeywords ?? [];
       const topics = keywords.map((name, i) => ({ id: String(i), name: `${name}话题`, index: 100, window: {} }));
       if (!excluded.includes('广告')) topics.push({ id: 'ad', name: '广告话题', index: 1, window: {} });
-      data = { tasks: [], runs, budgets: [], credentials: {}, queue: { total: 0, due: 0 },
-        discovery: { keywords, topics, videos: [], authors: [], ready: true, pending: { topicSearch: [], videos: [] } } };
+      const tasks = account === 1 ? [
+        { key: 'video', provider: 'index', operation: 'videos', target: '待采集词#7', status: 'due', error: null, last_success_at: Date.UTC(2026, 10, 14, 20, 0) },
+        { key: 'topic', provider: 'index', operation: 'topic_search', target: '定时采集词', status: 'waiting', next_run_at: Date.UTC(2026, 10, 15, 4, 0), error: null },
+        { key: 'snapshot', provider: 'xhs', operation: 'account_snapshot', target: 'account_snapshot', status: 'paused', source_error: 'login_required' },
+      ] : [];
+      data = { tasks, runs, budgets: [{ provider: 'index', daily_limit: 30, used: 0 }], credentials: { index: true },
+        queue: { total: tasks.length, due: tasks.filter(task => task.status === 'due').length },
+        discovery: { ready: true, keywords, topics, videos: [], authors: [], counts: { uniqueVideos: 0, excludedKeywords: 0 },
+          versions: { topics: '20261113', videos: '20261112' }, pending: { topicSearch: [], videos: [] } } };
     }
-    else if (url.pathname === '/api/collection/progress') data = { run_id: 1, running: false, progress: null, status: manualOutcome };
+    else if (url.pathname === '/api/collection/progress') data = { run_id: 1, running: manualOutcome === 'running', progress: 30, status: manualOutcome };
     else if (url.pathname === '/api/bloggers') data = bloggers;
     else if (/^\/api\/bloggers\/\d+$/.test(url.pathname)) data = { id: 1, kind: 'blogger', userId: 'u1', name: '甲', status: 'ready', profile: {}, works: [], trend: null };
     else if (url.pathname === '/api/notices') data = structuredClone(notices);
@@ -76,7 +85,9 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     }
     else if (url.pathname === '/api/collection/config') {
       data = accounts.find(value => value.id === account);
-      if (method === 'PUT') data.config = { ...data.config, index: JSON.parse(init.body) };
+      if (method === 'PUT') data.config = { ...data.config, ...(body.schedules
+        ? { schedules: { ...data.config.schedules, ...body.schedules } }
+        : { index: body }) };
     }
     else if (url.pathname === '/api/strategy') data = { sha: 'a'.repeat(40), base_sha: 'a'.repeat(40), draft: { 'account-profile.md': '初始画像' }, published: {}, history: [] };
     else if (url.pathname === '/api/keywords' && method === 'POST') {
@@ -107,6 +118,11 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     element.dispatchEvent(new window.Event('input', { bubbles: true }));
   });
   const field = label => visible(`[aria-label="${label}"]`)[0];
+  const clickField = async label => act(async () => {
+    const element = field(label);
+    assert.ok(element, `Missing control: ${label}`);
+    element.click();
+  });
   const shows = value => visible('span,p').some(el => el.textContent.trim() === value);
   const count = path => requests.filter(request => request.url.pathname === path && request.method === 'GET').length;
   const switchAccount = async id => {
@@ -131,11 +147,12 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     const monitorLoads = count('/api/monitor'); assert.equal(monitorLoads, 1);
     window.scrollTo(0, 420);
     await navigate('采集'); await click('定时');
-    assert.match(window.document.body.textContent, /连接平台/);
-    const limit = visible('input[type="number"]')[0]; await edit(limit, '3');
+    assert.ok(visible('h2').some(el => el.textContent === '定时采集'));
+    assert.ok(field('话题榜每轮请求上限'));
+    await edit(field('抖音指数每日采集次数上限'), '3');
     const configLoads = count('/api/collection/config');
     await navigate('帐号'); await click('账号画像'); await edit(field('账号画像正文'), '尚未保存的画像');
-    await navigate('采集'); await click('定时'); assert.equal(visible('input[type="number"]')[0].value, '3');
+    await navigate('采集'); await click('定时'); assert.equal(field('抖音指数每日采集次数上限').value, '3');
     assert.equal(count('/api/collection/config'), configLoads);
     await navigate('数据'); assert.equal(count('/api/monitor'), monitorLoads); assert.equal(scroll, 420);
     await navigate('采集'); await click('采集词'); await edit(field('新增关键词'), '新关键词'); await click('添加');
@@ -203,13 +220,84 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     assert.equal(window.localStorage.getItem('everyone-content-blogger-seen-1'), JSON.stringify({ 1: '2026-11-14 08:00:00' }));
     assert.equal(navTab('博主').textContent, '博主');
     await navigate('采集'); await click('总览');
+    assert.ok(!visible('p').some(el => el.textContent.includes('待执行')));
+    await click('队列');
+    assert.ok(visible('h2').some(el => el.textContent === '采集队列'));
+    assert.ok(shows('· 待采集词 · 近7天'));
+    assert.ok(shows('上次成功 2026-11-15 04:00:00'));
+    assert.ok(shows('未到时间'));
+    assert.ok(visible('p').some(el => el.textContent.includes('平台提示未登录')));
+    await click('待执行 1');
+    assert.ok(shows('· 待采集词 · 近7天'));
+    assert.ok(!shows('· 定时采集词'));
+    assert.ok(!shows('已暂停'));
+    assert.equal(field('队列筛选').querySelectorAll('button').length, 2);
+    await click('全部任务 3');
+    assert.ok(shows('· 定时采集词'));
+    await click('总览');
+    assert.equal(field('选择采集范围'), undefined);
+    for (const label of ['话题榜', '视频榜', '博主追踪']) {
+      assert.ok(field(`手动采集${label}`));
+      assert.equal(field(`${label}每轮请求上限`), undefined);
+    }
+    assert.equal(visible('[role="switch"]').length, 0);
+    await click('定时');
+    const indexSchedules = visible('h3').find(el => el.textContent === '抖音指数采集')?.parentElement;
+    const platformSchedules = visible('h3').find(el => el.textContent === '创作后台')?.parentElement;
+    assert.ok(indexSchedules?.contains(field('抖音指数每日采集次数上限')));
+    assert.ok(platformSchedules?.contains(field('小红书创作服务每轮请求上限')));
+    for (const label of ['话题榜', '视频榜', '博主追踪']) {
+      assert.equal(field(`手动采集${label}`), undefined);
+      assert.ok(indexSchedules.contains(field(`${label}每轮请求上限`)));
+      await act(async () => {
+        const toggle = visible('[role="switch"]').find(el => el.parentElement.textContent === `${label}定时`);
+        assert.ok(toggle);
+        const row = field(`${label}每轮请求上限`).closest('div.rounded-xl');
+        assert.ok(row.contains(toggle));
+        assert.ok(row.contains(field(`${label}运行时间`)));
+        toggle.click();
+      });
+    }
+    await edit(field('话题榜每轮请求上限'), '3');
+    await edit(field('视频榜每轮请求上限'), '4');
+    await edit(field('博主追踪每轮请求上限'), '5');
+    await clickField('话题榜运行时间');
+    await edit(field('新增话题榜运行时间'), '09:35');
+    await click('＋ 添加');
+    await clickField('移除话题榜运行时间10:00');
+    await clickField('话题榜运行时间');
+    await click('保存定时设置');
+    const saved = accounts[0].config.schedules;
+    assert.deepEqual(['topic_rank', 'video_rank', 'author'].map(scope => [saved[scope].enabled, saved[scope].request_limit]), [[true, 3], [true, 4], [true, 5]]);
+    assert.deepEqual(saved.topic_rank.times, ['09:35']);
+    assert.equal(saved.index.enabled, false);
+    await click('采集词'); await edit(field('新增关键词'), '独立榜单'); await click('添加');
+    await navigate('指数');
+    const assertCutoff = (intro, end) => {
+      const caption = visible('p').find(el => el.textContent.includes(intro));
+      assert.equal(caption?.querySelector('span')?.textContent, `数据截至 ${end}`);
+      assert.ok(!visible('button').some(el => el.textContent.trim() === '手动采集'));
+    };
+    assertCutoff('取30天指数排名', '2026-11-13');
+    await click('视频指数'); assertCutoff('共收集', '2026-11-12');
+    await click('达人指数'); assertCutoff('取近30天指数相加', '2026-11-12');
+    await navigate('采集'); await click('总览');
     runs.unshift({ id: 2, provider: 'douyin', operation: 'account_snapshot', target: 'account_snapshot', status: 'failed',
       observed_at: '2026-11-15 04:57:17', version: null, error: 'login_required' });
+    manualOutcome = 'running';
+    await clickField('手动采集话题榜');
+    assert.equal(field('手动采集话题榜').textContent, '采集中 30%');
+    assert.equal(field('手动采集视频榜').disabled, true);
     manualOutcome = 'partial';
-    await click('手动采集');
     await act(async () => { for (const fire of progressTimers.values()) await fire(); });
     assert.equal(requests.filter(r => r.url.pathname === '/api/collection/progress').at(-1).url.searchParams.get('run_id'), '1');
-    assert.ok(visible('span').some(el => el.textContent.includes('本轮部分采集失败')));
+    assert.ok(visible('p').some(el => el.textContent.includes('本轮部分采集失败')));
+    manualOutcome = 'done';
+    await clickField('手动采集视频榜');
+    await clickField('手动采集博主追踪');
+    assert.deepEqual(requests.filter(r => r.url.pathname === '/api/run/collect').slice(-3).map(r => r.body.only), ['topic_rank', 'video_rank', 'author']);
+    await act(async () => { visible('aside button').find(el => el.textContent === '博主').click(); });
+    assert.equal(field('手动采集博主追踪'), undefined);
     await click('日志');
     assert.ok(visible('p').some(el => el.textContent.includes('平台提示未登录')));
     assert.ok(visible('span').some(el => el.textContent === '账号快照'));

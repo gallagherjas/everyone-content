@@ -1,12 +1,17 @@
-import { hash, stamp, type CollectionStore } from '../../core/store.ts';
+import { hash, type CollectionStore } from '../../core/store.ts';
+import { collectionDay } from '../../../lib/time.ts';
 import { loadSession, type PlatformAuth } from './session.ts';
 
-// 创作后台账号级快照:每平台每轮一个总览请求,解析为可空的指标集。
-// 抖音与小红书端点已用真实会话探测确认(2026-11-14),各收敛为一个;B站仍是推测候选,连上后需同样探测;schema_error 会自动禁用任务。
+// 创作后台账号级快照：每平台一次总览请求，缺项保留 null。
+const BILI_ORIGIN = 'https://member.bilibili.com';
+export const BILI_CREATOR_HOME = BILI_ORIGIN + '/platform/home';
+const BILI_STATS_PATH = '/x/web/data/index/stat?tmid=-1';
+export const BILI_SESSION_URL = BILI_ORIGIN + BILI_STATS_PATH;
+
 interface PlatformSnapshot {
   origin: string;
   referer: string;
-  endpoints: string[];
+  path: string;
   uid: string[];
   fans: string[];
   likes: string[];
@@ -17,7 +22,7 @@ export const SNAPSHOT_PLATFORMS: Record<string, PlatformSnapshot> = {
   douyin: {
     origin: 'https://creator.douyin.com',
     referer: 'https://creator.douyin.com/',
-    endpoints: ['/aweme/v1/creator/user/info/'],
+    path: '/aweme/v1/creator/user/info/',
     uid: [],
     fans: ['douyin_user_verify_info.follower_count', 'user_profile.follower_count'],
     likes: ['douyin_user_verify_info.total_favorited', 'user_profile.total_favorited'],
@@ -27,7 +32,7 @@ export const SNAPSHOT_PLATFORMS: Record<string, PlatformSnapshot> = {
   xhs: {
     origin: 'https://creator.xiaohongshu.com',
     referer: 'https://creator.xiaohongshu.com/',
-    endpoints: ['/api/galaxy/creator/home/personal_info'],
+    path: '/api/galaxy/creator/home/personal_info',
     uid: ['data.red_num'],
     fans: ['data.fans_count', 'data.grow_info.fans_count'],
     likes: ['data.faved_count'],
@@ -35,14 +40,14 @@ export const SNAPSHOT_PLATFORMS: Record<string, PlatformSnapshot> = {
     views: [],
   },
   bili: {
-    origin: 'https://member.bilibili.com',
-    referer: 'https://member.bilibili.com/platform/home',
-    endpoints: ['/x2/creative/web/data/overview', '/x2/creative/web/center/overview'],
-    uid: ['data.uid', 'data.mid', 'data.user.mid'],
-    fans: ['data.fans', 'data.follower', 'data.stat.fans'],
-    likes: ['data.like', 'data.likes', 'data.stat.like'],
-    works: ['data.archive_count', 'data.works', 'data.stat.archive'],
-    views: ['data.play', 'data.views', 'data.stat.play'],
+    origin: BILI_ORIGIN,
+    referer: BILI_CREATOR_HOME,
+    path: BILI_STATS_PATH,
+    uid: [],
+    fans: ['data.total_fans'],
+    likes: ['data.total_like'],
+    works: [],
+    views: ['data.total_click'],
   },
 };
 
@@ -54,7 +59,7 @@ function parseCount(value: string): number | null {
   if (!m) return null;
   const n = Number(m[1]);
   if (!Number.isFinite(n)) return null;
-  const unit = { 万: 1e4, w: 1e4, W: 1e4, k: 1e3, K: 1e3 }[m[2]] ?? 1;
+  const unit = { 万: 1e4, 亿: 1e8, w: 1e4, W: 1e4, k: 1e3, K: 1e3 }[m[2]] ?? 1;
   return Math.round(n * unit);
 }
 function pick(body: any, paths: string[]): number | null {
@@ -70,47 +75,36 @@ function pick(body: any, paths: string[]): number | null {
 export async function fetchSnapshot(provider: string, auth: PlatformAuth, client: typeof fetch): Promise<Snapshot> {
   const p = SNAPSHOT_PLATFORMS[provider];
   if (!p) throw new Error('schema_error');
-  let mismatch = 'schema_error';
-  for (const path of p.endpoints) {
-    let res: Response;
-    try {
-      res = await client(p.origin + path, {
-        headers: { cookie: auth.cookie, referer: p.referer, ...(auth.userAgent ? { 'user-agent': auth.userAgent } : {}) },
-        signal: AbortSignal.timeout(20000), redirect: 'manual',
-      });
-    } catch (error) {
-      if (/^(daily_budget_exhausted|tick_budget_exhausted|source_paused)$|^interval_pending /.test((error as Error)?.message ?? '')) throw error;
-      throw new Error('transport_error', { cause: error });
-    }
-    if (res.status === 401) throw new Error('login_required');
-    if (res.status === 429) throw new Error('rate_limited');
-    if ([404, 405].includes(res.status)) {
-      mismatch = `http_error_${res.status}`;
-      continue;
-    }
-    if (!res.ok) throw new Error(`http_error_${res.status}`);
-    const text = await res.text().catch(error => { throw new Error('transport_error', { cause: error }); });
-    if (/^\s*</.test(text)) throw new Error('unexpected_html');
-    let body: any;
-    try { body = JSON.parse(text); } catch { throw new Error('invalid_response'); }
-    const code = Number(body?.status_code ?? body?.code ?? 0);
-    const message = body?.status_msg ?? body?.message ?? body?.msg;
-    if (code === 401 || (provider === 'douyin' && code === 8) ||
-        (typeof message === 'string' && /^(用户未登录|请先登录)[。！! ]*$/.test(message.trim()))) {
-      throw new Error('login_required');
-    }
-    if (code === 429) throw new Error('rate_limited');
-    if (![0, 200].includes(code) || body?.success === false) throw new Error('business_error');
-    const metrics = {
-      fans: pick(body, p.fans), likes: pick(body, p.likes), works: pick(body, p.works), views: pick(body, p.views),
-    };
-    if (Object.values(metrics).every(v => v === null)) {
-      mismatch = 'schema_error';
-      continue;
-    }
-    return { uid: String(pick(body, p.uid) ?? 'self'), metrics };
+  let res: Response;
+  try {
+    res = await client(p.origin + p.path, {
+      headers: { cookie: auth.cookie, referer: p.referer, ...(auth.userAgent ? { 'user-agent': auth.userAgent } : {}) },
+      signal: AbortSignal.timeout(20000), redirect: 'manual',
+    });
+  } catch (error) {
+    if (/^(daily_budget_exhausted|tick_budget_exhausted|source_paused)$|^interval_pending /.test((error as Error)?.message ?? '')) throw error;
+    throw new Error('transport_error', { cause: error });
   }
-  throw new Error(mismatch);
+  if (res.status === 401) throw new Error('login_required');
+  if (res.status === 429) throw new Error('rate_limited');
+  if (!res.ok) throw new Error(`http_error_${res.status}`);
+  const text = await res.text().catch(error => { throw new Error('transport_error', { cause: error }); });
+  if (/^\s*</.test(text)) throw new Error('unexpected_html');
+  let body: any;
+  try { body = JSON.parse(text); } catch { throw new Error('invalid_response'); }
+  const code = Number(body?.status_code ?? body?.code ?? 0);
+  const message = body?.status_msg ?? body?.message ?? body?.msg;
+  if (code === 401 || (provider === 'douyin' && code === 8) || (provider === 'bili' && code === -101) ||
+      (typeof message === 'string' && /^(用户未登录|账号未登录|请先登录)[。！! ]*$/.test(message.trim()))) {
+    throw new Error('login_required');
+  }
+  if (code === 429) throw new Error('rate_limited');
+  if (![0, 200].includes(code) || body?.success === false) throw new Error('business_error');
+  const metrics = {
+    fans: pick(body, p.fans), likes: pick(body, p.likes), works: pick(body, p.works), views: pick(body, p.views),
+  };
+  if (Object.values(metrics).every(v => v === null)) throw new Error('schema_error');
+  return { uid: String(pick(body, p.uid) ?? 'self'), metrics };
 }
 
 // runner 的 execute 分发入口:凭证读取 → 当日去重 → 单请求快照。
@@ -121,9 +115,9 @@ export async function snapshotExecute(store: CollectionStore, run: any, client: 
     WHERE a.task_key=? AND c.provider=? LIMIT 1`,
   ).get(run.task_key, run.provider) as any;
   const auth = loadSession(credential?.auth_path);
-  const version = stamp(clock()).slice(0, 10);
   const previous = store.latest(run.task_key);
-  if (credential?.last_success_at != null && previous?.version === version) return { cached: previous, version };
+  if (credential?.last_success_at != null && previous?.version === collectionDay(run.at_ms))
+    return { cached: previous, version: previous.version };
   const snapshot = await fetchSnapshot(run.provider, auth, client);
-  return { data: snapshot, version, fingerprint: hash(JSON.stringify(snapshot.metrics)) };
+  return { data: snapshot, version: collectionDay(clock()), fingerprint: hash(JSON.stringify(snapshot.metrics)) };
 }

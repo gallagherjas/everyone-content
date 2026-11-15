@@ -55,6 +55,26 @@ test('平台哨兵 cookie 隔离：抖音会话不构成小红书或B站登录',
     assert.throws(() => manager.state(db, 1, 'unknown'), /未知平台/);
   } finally { db.close(); }
 });
+test('B站使用官方登录页，并只读取可发送给创作中心总览的会话', async () => {
+  const db = database();
+  try {
+    const biliSession = { name: 'SESSDATA', value: 'synthetic-bili-session', domain: '.bilibili.com', path: '/', expires: -1 };
+    const manager = new PlatformLoginManager({
+      launch: async (_signal, target, cookieUrl) => {
+        const login = new URL(target);
+        assert.equal(login.origin + login.pathname, 'https://passport.bilibili.com/login');
+        assert.equal(login.searchParams.get('gourl'), 'https://member.bilibili.com/platform/home');
+        assert.equal(cookieUrl, 'https://member.bilibili.com/x/web/data/index/stat?tmid=-1');
+        return windowWith(async () => [biliSession]);
+      },
+      save: saveInto(db),
+    });
+    manager.start(db, 1, 'bili'); await manager.settle('bili', 1);
+    assert.equal(manager.state(db, 1, 'bili').status, 'configured');
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM collection_credentials WHERE provider='bili'").get()!.n, 1);
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM collection_requests').get()!.n, 0);
+  } finally { db.close(); }
+});
 test('同一账号重复点击只启动一次，其他账号不能串用登录窗口，取消后不保存', async () => {
   const db = database();
   try {

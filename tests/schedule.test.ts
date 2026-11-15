@@ -14,7 +14,7 @@ function setup() {
     calls.push({ id, args });
     return { run_id: Number(db.prepare("INSERT INTO task_runs(account_id,task,status) VALUES(?,'collect','done')").run(id).lastInsertRowid) };
   };
-  const save = (id: number, schedules: ReturnType<typeof defaultSchedules>) => {
+  const save = (id: number, schedules: Partial<ReturnType<typeof defaultSchedules>>) => {
     const row = db.prepare('SELECT config FROM accounts WHERE id=?').get(id)!;
     db.prepare('UPDATE accounts SET config=? WHERE id=?').run(JSON.stringify({ ...JSON.parse(row.config as string), schedules }), id);
   };
@@ -23,7 +23,8 @@ function setup() {
 }
 test('指数定时默认关闭，按北京时间校验时间与请求上限', () => {
   const schedules = defaultSchedules();
-  assert.deepEqual(Object.keys(schedules), ['index', 'douyin', 'xhs', 'bili']);
+  assert.deepEqual(Object.keys(schedules), ['topic_rank', 'video_rank', 'author', 'index', 'douyin', 'xhs', 'bili']);
+  assert.ok(Object.values(schedules).every(schedule => !schedule.enabled));
   assert.equal(latestScheduleSlot(schedules.index, now), null);
   schedules.index = { enabled: true, times: ['10:30', '09:30', '09:30'], request_limit: 2 };
   assert.deepEqual(validateSchedules(schedules).index.times, ['09:30', '10:30']);
@@ -42,6 +43,29 @@ test('时间点不重复，电脑唤醒只补当天最近一次', () => {
     assert.equal(runScheduledCollection(db, start, now + 3600000)?.slot, '2026-11-09 02:30:00');
     assert.equal(calls.length, 2);
     assert.deepEqual(calls[0].args, ['--scheduled', '--only=index', '--limit=3']);
+  } finally { db.close(); }
+});
+test('话题榜、视频榜和博主各自按时触发，同一抖音指数授权支持三个范围', () => {
+  const { db, calls, start, save, authorize } = setup();
+  try {
+    save(1, {
+      topic_rank: { enabled: true, times: ['09:30'], request_limit: 2 },
+      video_rank: { enabled: true, times: ['10:00'], request_limit: 6 },
+      author: { enabled: true, times: ['10:00'], request_limit: 4 },
+    });
+    assert.equal(runScheduledCollection(db, start, now), null);
+    authorize(1);
+    assert.equal(runScheduledCollection(db, start, now)?.scope, 'topic_rank');
+    assert.equal(runScheduledCollection(db, start, now), null);
+    const secondSlot = now + 30 * 60_000;
+    assert.equal(runScheduledCollection(db, start, secondSlot)?.scope, 'video_rank');
+    assert.equal(runScheduledCollection(db, start, secondSlot)?.scope, 'author');
+    assert.equal(runScheduledCollection(db, start, secondSlot), null);
+    assert.deepEqual(calls.map(call => call.args), [
+      ['--scheduled', '--only=topic_rank', '--limit=2'],
+      ['--scheduled', '--only=video_rank', '--limit=6'],
+      ['--scheduled', '--only=author', '--limit=4'],
+    ]);
   } finally { db.close(); }
 });
 test('采集忙碌不消耗时间点，恢复后仍可触发', () => {

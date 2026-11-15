@@ -49,7 +49,7 @@ Open an agent conversation in the project directory and try either of these requ
 ## Core flow
 
 1. **Set up an account.** Create or select an account, publish its completed profile, connect to the Douyin Index, and save keywords and exclusion words. For an existing account, resume from the missing steps. 
-2. **Collect.** Run a round from Collect → Overview or use the dropdown next to the button to choose a collection scope. You can also ask the agent to collect for a specific account or enable a schedule in Collect → Schedule.
+2. **Collect.** Run topic, video, or tracked creator collection from Collect → Overview. Set separate schedules in Collect → Schedule. You can ask the agent to collect for a specific account.
 3. **Pick topics yourself.** Browse the leaderboard in Index → Videos, watch the videos on the platform, and decide which topics to pursue.
 4. **Ask the agent to review a topic.** Once the completed profile is published, submit a **title, target audience, and one-line value**. The agent checks account fit, consistency, and specificity. You can include reference videos.
 5. **Write on demand.** Before drafting or editing, provide 3 of your own video scripts with at least 300 characters of body text in total. 

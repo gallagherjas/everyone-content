@@ -13,6 +13,7 @@ import { registerAuth } from '../collector/core/settings.ts';
 import { authFromCookies } from '../collector/sources/douyin-index/client.ts';
 import { ORIGIN } from '../collector/sources/douyin-index/protocol.ts';
 import { sessionFromCookies, loadSession, type PlatformAuth } from '../collector/sources/platform/session.ts';
+import { BILI_CREATOR_HOME, BILI_SESSION_URL } from '../collector/sources/platform/snapshot.ts';
 
 const running = (status: string) => status === 'preparing' || status === 'waiting';
 // 登录失效的统一口径：暂停原因命中这些受控错误码即视为会话失效，登录状态展示与工作台提醒共用。
@@ -31,7 +32,7 @@ const messages: Record<string, string> = {
 };
 
 // 各平台的扫码登录配置:入口页、cookie 挑选(含哨兵校验)与会话文件名。
-export interface LoginPlatform { label: string; loginUrl: string; file: string; pick: (cookies: any[], userAgent?: string) => PlatformAuth }
+export interface LoginPlatform { label: string; loginUrl: string; cookieUrl?: string; file: string; pick: (cookies: any[], userAgent?: string) => PlatformAuth }
 export const LOGIN_PLATFORMS: Record<string, LoginPlatform> = {
   index: {
     label: '抖音指数',
@@ -59,7 +60,8 @@ export const LOGIN_PLATFORMS: Record<string, LoginPlatform> = {
   },
   bili: {
     label: 'B站创作中心',
-    loginUrl: 'https://member.bilibili.com/platform/home',
+    loginUrl: `https://passport.bilibili.com/login?gourl=${encodeURIComponent(BILI_CREATOR_HOME)}`,
+    cookieUrl: BILI_SESSION_URL,
     file: 'bili.json',
     pick: (cookies, userAgent) => sessionFromCookies(cookies, ['member.bilibili.com', '.bilibili.com', 'bilibili.com'],
       /(?:^|; )SESSDATA=[^;]+/, userAgent),
@@ -75,7 +77,7 @@ interface LoginWindow {
 }
 interface Job { key: string; accountId: number; provider: string; status: string; abort: AbortController; window?: LoginWindow; done?: Promise<void> }
 
-async function openLoginWindow(signal: AbortSignal, loginUrl: string): Promise<LoginWindow> {
+async function openLoginWindow(signal: AbortSignal, loginUrl: string, cookieUrl?: string): Promise<LoginWindow> {
   const { chromium } = await import('playwright');
   let browser;
   if (existsSync(chromium.executablePath())) browser = await chromium.launch({ headless: false });
@@ -101,7 +103,7 @@ async function openLoginWindow(signal: AbortSignal, loginUrl: string): Promise<L
     await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 })
       .catch(() => { throw new Error(page.isClosed() ? 'window_closed' : 'login_page_unavailable'); });
     return {
-      cookies: () => context.cookies(), userAgent: () => page.evaluate(() => navigator.userAgent),
+      cookies: () => context.cookies(cookieUrl), userAgent: () => page.evaluate(() => navigator.userAgent),
       isClosed: () => page.isClosed() || !browser.isConnected(), close: () => browser.close(),
     };
   } catch (error) { await browser.close().catch(() => {}); throw error; }
@@ -145,7 +147,7 @@ export function connectionStatus(db: DatabaseSync, id: number, provider: string)
 
 export class PlatformLoginManager {
   private jobs = new Map<string, Job>();
-  private launch: (signal: AbortSignal, loginUrl: string) => Promise<LoginWindow>;
+  private launch: typeof openLoginWindow;
   private save: (provider: string, accountId: number, cookies: Cookie[], userAgent?: string) => void;
   private clock: () => number;
   private sleep: () => Promise<void>;
@@ -185,7 +187,7 @@ export class PlatformLoginManager {
   private async run(job: Job) {
     const platform = LOGIN_PLATFORMS[job.provider];
     try {
-      job.window = await this.launch(job.abort.signal, platform.loginUrl);
+      job.window = await this.launch(job.abort.signal, platform.loginUrl, platform.cookieUrl);
       if (job.abort.signal.aborted) return;
       job.status = 'waiting'; const deadline = this.clock() + 10 * 60_000;
       while (!job.abort.signal.aborted) {

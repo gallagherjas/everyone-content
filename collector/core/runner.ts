@@ -1,11 +1,13 @@
 import { ReadClient,loadAuth } from '../sources/douyin-index/client.ts';
 import { requestFor,semanticHash } from '../sources/douyin-index/protocol.ts';
-import { snapshotExecute } from '../sources/platform/snapshot.ts';
-import { atomic,stamp,taskKey,SCOPES,taskScope, type CollectionStore } from './store.ts';
+import { SNAPSHOT_PLATFORMS,snapshotExecute } from '../sources/platform/snapshot.ts';
+import { atomic,taskKey,taskInScope,scheduledTaskEnabled, type CollectionStore } from './store.ts';
 import { parseJson } from '../../lib/json.ts';
+import { COLLECTION_SCOPES } from '../../lib/collection-schedule.ts';
+import { COLLECTION_DAY_MS, collectionDay, nextCollectionDay } from '../../lib/time.ts';
 
 import { planCollection } from './planner.ts';
-const DAY=86400000,HOUR=3600000;
+const HOUR=3600000;
 export function controlledError(error: any): string {
   if(['ECONNREFUSED','ENOTFOUND','EHOSTUNREACH'].includes(error?.cause?.code??error?.code))return 'service_unavailable';
   if(error?.message==='login_or_challenge_html')return 'login_required';
@@ -40,13 +42,13 @@ async function execute(store: CollectionStore,run: any,client: any,clock: ()=>nu
   const datesRun=domain?store.latest(taskKey('index',run.scope,{type:`${domain}_dates`})):null;
   const dates={topic:domain==='topic'&&datesRun?store.data(datesRun):null,author:domain==='author'&&datesRun?store.data(datesRun):null};
   if(domain&&!dates[domain])throw new Error('source_dates_missing');
-  const version=domain===null?new Date(clock()).toISOString().slice(0,10):spec.type==='topic_relation'?dates.topic.valid_week:domain==='author'?dates.author.datetime:dates.topic.valid_day;
+  const version=domain===null?null:spec.type==='topic_relation'?dates.topic.valid_week:domain==='author'?dates.author.datetime:dates.topic.valid_day;
   const previous=store.latest(run.task_key);
   if(domain===null?false:previous?.version===version)return {cached:previous,version};
   const auth=loadAuth(credential?.auth_path,{});
   const req=requestFor(spec,dates);
   const response=await new ReadClient(auth,{fetchImpl:client,intervalMs:1000,sleep:async()=>{}}).read(spec,req);
-  return {data:response.data,version,fingerprint:semanticHash(spec.type,response.data)};
+  return {data:response.data,version:version??collectionDay(clock()),fingerprint:semanticHash(spec.type,response.data)};
 }
 
 export interface RunOptions {
@@ -57,12 +59,12 @@ export interface RunOptions {
   progress?: (percent: number) => void;
 }
 export async function runCollection(store: CollectionStore,options: RunOptions={}) {
-  if(options.only&&!SCOPES.includes(options.only))throw new Error('未知采集来源');
+  if(options.only&&!COLLECTION_SCOPES.includes(options.only))throw new Error('未知采集来源');
   const clock=options.clock??Date.now,sleep=options.sleep??(ms=>new Promise(r=>setTimeout(r,ms))),counts: Record<string,number>={};
   const accounts=planCollection(store,{...options,now:clock()}),ids=accounts.map(a=>a.id),served: Record<number,number>={};
-  for(const a of accounts)served[a.id]=(store.db.prepare("SELECT COUNT(*) n FROM collection_run_accounts a JOIN collection_runs r ON r.id=a.run_id WHERE a.account_id=? AND r.observed_at>=?").get(a.id,stamp(clock()).slice(0,10)) as any).n;
-  let tasks=store.dueTasks(ids,clock());
-  const visited=new Set<string>();let done=0,total=tasks.length;
+  for(const a of accounts)served[a.id]=(store.db.prepare("SELECT COUNT(*) n FROM collection_run_accounts a JOIN collection_runs r ON r.id=a.run_id WHERE a.account_id=? AND r.observed_at>=?").get(a.id,collectionDay(clock())) as any).n;
+  const visited=new Set<string>();
+  const due=()=>store.dueTasks(ids,clock()).filter(task=>!visited.has(task.key)&&taskInScope(task,options.only));
   const compare=(a: any,b: any)=>{
     const fairness=(t: any)=>Math.min(...store.accounts(t.key).map((a: any)=>served[a.id]??0));
     const urgency=(t: any)=>t.priority+Math.log1p(Math.max(0,clock()-t.next_run_at)/HOUR);
@@ -70,26 +72,42 @@ export async function runCollection(store: CollectionStore,options: RunOptions={
   };
   const exhausted=new Set<string>(),summary={completed:0,cached:0,failed:0,deferred:0,requests:counts,
     accounts:Object.fromEntries(ids.map(id=>[id,{completed:0,cached:0,failed:0,deferred:0}]))};
+  // 点单个平台时展示当日缓存，已到换日的任务走正常领取与请求。
+  if(!options.scheduled&&options.only&&Object.hasOwn(SNAPSHOT_PLATFORMS,options.only)){
+    const at=clock();
+    for(const id of ids){
+      const snapshot=store.freshSnapshot(id,options.only,at);
+      if(!snapshot)continue;
+      atomic(store.db,()=>{
+        const run=store.begin(snapshot,at,null,[id]);
+        store.reuse(run.id,snapshot.previous_id,snapshot.version);
+      });
+      visited.add(snapshot.key);
+      summary.cached++;
+      summary.accounts[id].cached++;
+      options.log?.(`${snapshot.provider}/${snapshot.operation} ${snapshot.target}：复用有效版本`,[id]);
+    }
+  }
+  let tasks=due(),done=0,total=tasks.length;
   let indexChanged=false;
   while(true) {
     if(!tasks.length){
       if(!indexChanged)break;
       indexChanged=false;
       planCollection(store,{...options,now:clock()});
-      tasks=store.dueTasks(ids,clock()).filter(t=>!visited.has(t.key));
+      tasks=due();
       if(!tasks.length)break;
     }
     tasks.sort(compare);const task=tasks.shift()!;
     visited.add(task.key);done++;total=Math.max(total,done+tasks.length);
     options.progress?.(Math.min(99,Math.round(done*100/total)));
-    if(options.only&&(options.only!=='index'?taskScope(task)!==options.only:task.provider!=='index'))continue;
     if(task.provider==='index'&&!['topic_dates','author_dates'].includes(task.operation)){
       const datesType=task.operation.startsWith('author_')?'author_dates':'topic_dates';
       if(!store.latest(taskKey('index',task.scope,{type:datesType})))continue;
     }
     if((store.db.prepare('SELECT paused FROM collection_provider_state WHERE provider=? AND scope=?').get(task.provider,task.scope) as any)?.paused)continue;
     const assigned=new Set(store.accounts(task.key).map((a: any)=>a.id));
-    const participants=accounts.filter(a=>assigned.has(a.id)&&(!options.scheduled||a.config.schedules[task.provider]?.enabled)).map(a=>a.id);
+    const participants=accounts.filter(a=>assigned.has(a.id)&&(!options.scheduled||options.only||scheduledTaskEnabled(a.config.schedules,task))).map(a=>a.id);
     if(!participants.length)continue;
     const defer=(recorded: boolean)=>{
       if(recorded)summary.deferred++;
@@ -103,25 +121,23 @@ export async function runCollection(store: CollectionStore,options: RunOptions={
     const run=store.begin(task,clock(),null,participants);
     try {
       const result=await execute(store,run,transport(store,run,counts,options.fetchImpl??fetch,sleep,clock,options.requestLimit),clock);
+      const finishedAt=clock();
+      let next=nextCollectionDay(task.provider==='index'?finishedAt:Date.parse(result.version));
       if(result.cached){
-        atomic(store.db,()=>{
-          store.db.prepare("UPDATE collection_runs SET status='cached',version=? WHERE id=?").run(result.version,run.id);
-          for(const id of participants)store.db.prepare('INSERT OR IGNORE INTO collection_run_accounts VALUES(?,?,?)').run(result.cached.id,id,accounts.find(a=>a.id===id)!.configSha);
-        });summary.cached++;
-        store.release(task,clock()+Math.min(HOUR,task.interval_ms));
+        store.reuse(run.id,result.cached.id,result.version);
+        summary.cached++;
       }else{
         // 指数的事实由 rebuildAccount 在读取侧落库;创作后台快照在此直接写观测。
         const project = task.provider==='index' ? ()=>{} : (finished: any,data: any)=>store.observation(finished,'account',data.uid,'account',data.metrics);
-        store.finish(run,result.data,result.version,result.fingerprint,project,clock());summary.completed++;
-        let interval=task.interval_ms;
+        store.finish(run,result.data,result.version,result.fingerprint,project,finishedAt);summary.completed++;
         if(task.provider==='index'&&task.operation.endsWith('_dates')){
           const effective=result.data.valid_day??result.data.datetime;
-          const lag=effective&&Date.parse(`${effective.slice(0,4)}-${effective.slice(4,6)}-${effective.slice(6,8)}T00:00:00Z`)<clock()-DAY;
-          const today=stamp(clock()).slice(0,10),attempts=(store.db.prepare("SELECT COUNT(*) n FROM collection_runs WHERE task_key=? AND status='ok' AND observed_at>=?").get(task.key,today) as any).n;
-          if(lag&&attempts<2)interval=6*HOUR;
+          const lag=effective&&effective<collectionDay(finishedAt-COLLECTION_DAY_MS).replaceAll('-','');
+          const attempts=(store.db.prepare("SELECT COUNT(*) n FROM collection_runs WHERE task_key=? AND status='ok' AND version=?").get(task.key,result.version) as any).n;
+          if(lag&&attempts<2)next=Math.min(next,finishedAt+6*HOUR);
         }
-        store.release(task,clock()+interval);
       }
+      store.release(task,next);
       for(const a of store.accounts(task.key))served[a.id]=(served[a.id]??0)+1;
       if(task.provider==='index')indexChanged=true;
       for(const id of participants)summary.accounts[id][result.cached?'cached':'completed']++;
@@ -137,7 +153,7 @@ export async function runCollection(store: CollectionStore,options: RunOptions={
       const code=controlledError(error);
       if(/^(daily|tick)_budget_exhausted$/.test(code)){
         store.db.prepare("UPDATE collection_runs SET status='deferred',error=? WHERE id=?").run(code,run.id);
-        store.release(task,code.startsWith('daily')?Math.floor(clock()/DAY)*DAY+DAY:clock()+300000,code);exhausted.add(task.provider);defer(true);
+        store.release(task,code.startsWith('daily')?nextCollectionDay(clock()):clock()+300000,code);exhausted.add(task.provider);defer(true);
       }else{store.fail(run,code,clock());summary.failed++;for(const id of participants)summary.accounts[id].failed++;if(code==='service_unavailable')exhausted.add(task.provider);}
       options.log?.(`${task.provider}/${task.operation} ${task.target}：${code}`,participants);
     }

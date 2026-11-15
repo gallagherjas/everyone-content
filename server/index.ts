@@ -31,7 +31,8 @@ import { initializationOverview } from '../lib/initialization.ts';
 import { platformLogin, LOGIN_PLATFORMS } from '../lib/platform-login.ts';
 import { monitorOverview } from '../lib/monitor.ts';
 import { noticeOverview } from '../lib/notices.ts';
-import { CollectionStore, PROVIDERS, SCOPES, atomic } from '../collector/core/store.ts';
+import { CollectionStore, PROVIDERS, atomic } from '../collector/core/store.ts';
+import { COLLECTION_SCOPES } from '../lib/collection-schedule.ts';
 import { collectionStatus } from '../collector/core/status.ts';
 import { normalize } from '../collector/core/discovery.ts';
 import { planCollection } from '../collector/core/planner.ts';
@@ -237,6 +238,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
       try {
         const current = activeAccount(db, id);
         const patch = Object.hasOwn(update, 'discovery') || Object.hasOwn(update, 'tasks') ? { index: update } : update;
+        const schedules = patch.schedules;
+        if (schedules && typeof schedules === 'object' && !Array.isArray(schedules))
+          patch.schedules = { ...current.config.schedules, ...schedules };
         const config = validateConfig({ ...current.config, ...patch });
         atomic(db, () => {
           db.prepare('UPDATE accounts SET config=? WHERE id=?').run(JSON.stringify(config), id);
@@ -432,7 +436,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
     const b = await body(req),
       extra: string[] = [];
     if (b.only) {
-      if (!SCOPES.includes(b.only)) throw new InputError('采集范围无效');
+      if (!COLLECTION_SCOPES.includes(b.only)) throw new InputError('采集范围无效');
       extra.push(`--only=${b.only}`);
     }
     return json(res, startTask(db, id, 'collect', extra), 202);
