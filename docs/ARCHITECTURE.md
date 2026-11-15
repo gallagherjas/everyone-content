@@ -39,7 +39,7 @@ everyone-content/
   → 本地 API → 工作台
 ```
 
-工作台手动采集和定时采集共用子进程入口与全局互斥锁。服务每 30 秒检查定时任务，在 `collection_schedule_runs` 中按账号、来源和时点记录已启动的任务，避免重复执行。[定时调度](../lib/collection-scheduler.ts)
+工作台手动采集和定时采集共用子进程入口与全局互斥锁。手动采集可按范围独立执行：指数拆为话题域与达友域，平台快照按来源独立，范围在 runner 层统一过滤。服务每 30 秒检查定时任务，在 `collection_schedule_runs` 中按账号、来源和时点记录已启动的任务，避免重复执行。[定时调度](../lib/collection-scheduler.ts)
 
 原始响应与解析数据压缩保存于 `runtime/collection/objects/`，SQLite 记录文件路径和 SHA256，并保存作品、作者、话题及指标观测。采集时间、来源有效日期和统计窗口分别记录。未知指标保留 `null`，平台 ID 以字符串保存。数据库时间以 UTC 空格格式存储，界面按北京时间显示。
 

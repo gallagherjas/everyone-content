@@ -1,7 +1,7 @@
 import { ReadClient,loadAuth } from '../sources/douyin-index/client.ts';
 import { requestFor,semanticHash } from '../sources/douyin-index/protocol.ts';
 import { snapshotExecute } from '../sources/platform/snapshot.ts';
-import { atomic,stamp,taskKey,PROVIDERS, type CollectionStore } from './store.ts';
+import { atomic,stamp,taskKey,SCOPES,taskScope, type CollectionStore } from './store.ts';
 import { parseJson } from '../../lib/json.ts';
 
 import { planCollection } from './planner.ts';
@@ -57,7 +57,7 @@ export interface RunOptions {
   progress?: (percent: number) => void;
 }
 export async function runCollection(store: CollectionStore,options: RunOptions={}) {
-  if(options.only&&!PROVIDERS.includes(options.only))throw new Error('未知采集来源');
+  if(options.only&&!SCOPES.includes(options.only))throw new Error('未知采集来源');
   const clock=options.clock??Date.now,sleep=options.sleep??(ms=>new Promise(r=>setTimeout(r,ms))),counts: Record<string,number>={};
   const accounts=planCollection(store,{...options,now:clock()}),ids=accounts.map(a=>a.id),served: Record<number,number>={};
   for(const a of accounts)served[a.id]=(store.db.prepare("SELECT COUNT(*) n FROM collection_run_accounts a JOIN collection_runs r ON r.id=a.run_id WHERE a.account_id=? AND r.observed_at>=?").get(a.id,stamp(clock()).slice(0,10)) as any).n;
@@ -82,7 +82,7 @@ export async function runCollection(store: CollectionStore,options: RunOptions={
     visited.add(task.key);done++;total=Math.max(total,done+tasks.length);
     options.progress?.(Math.min(99,Math.round(done*100/total)));
     if(Object.values(counts).reduce((a,b)=>a+b,0)>=(options.requestLimit??Infinity))break;
-    if((options.only&&task.provider!==options.only)||exhausted.has(task.provider))continue;
+    if((options.only&&(options.only!=='index'?taskScope(task)!==options.only:task.provider!=='index'))||exhausted.has(task.provider))continue;
     if(task.provider==='index'&&!['topic_dates','author_dates'].includes(task.operation)){
       const datesType=task.operation.startsWith('author_')?'author_dates':'topic_dates';
       if(!store.latest(taskKey('index',task.scope,{type:datesType})))continue;

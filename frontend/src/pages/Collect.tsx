@@ -35,8 +35,8 @@ export default function CollectPage({ current, onUpdate, jumpTo }: { current: Ac
   const [src, setSrc] = useState<{ keywords: Source[] }>({ keywords: [] }), [keyword, setKeyword] = useState(""), [bloggerName, setBloggerName] = useState("");
   const [bloggers, setBloggers] = useState<BloggerRow[]>([]);
   const [runDetail, setRunDetail] = useState<{ id: number; text: string } | null>(null);
-  const [busy, setBusy] = useState(false), [failure, setFailure] = useState(false), [message, setMessage] = useState("");
-  const lastRuns = useRef<string | null>(null), wasRunning = useRef(false);
+  const [busy, setBusy] = useState(false), [failure, setFailure] = useState(false), [message, setMessage] = useState(""), [menuOpen, setMenuOpen] = useState(false);
+  const lastRuns = useRef<string | null>(null), wasRunning = useRef(false), menuRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(() => api<State>("/api/collection").then(value => {
     setState(value);
@@ -68,6 +68,13 @@ export default function CollectPage({ current, onUpdate, jumpTo }: { current: Ac
     return () => { alive = false; clearInterval(timer); };
   }, [visible, load, invalidate, api]);
   useEffect(() => { if (!visible) return; const timer = setInterval(load, 10000); return () => clearInterval(timer); }, [visible, load]);
+  // 采集范围下拉菜单：点击外部关闭。
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = (e: PointerEvent) => { if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false); };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [menuOpen]);
 
   const action = async (fn: () => Promise<unknown>, text: string) => {
     if (busy) return; setBusy(true); setFailure(false); setMessage("");
@@ -76,6 +83,18 @@ export default function CollectPage({ current, onUpdate, jumpTo }: { current: Ac
     finally { setBusy(false); }
   };
   const runPage = usePaged(state?.runs ?? []);
+  // 独立采集范围：指数两域与已连接平台；主按钮仍为全部采集。
+  const scopeItems = [
+    ...(state?.credentials?.index ? [{ key: "topic", label: "采集词（话题+视频）" }, { key: "author", label: "博主追踪" }] : []),
+    ...(["douyin", "xhs", "bili"] as const).filter(p => state?.credentials?.[p]).map(p => ({ key: p, label: names[p] })),
+  ];
+  const collect = async (only?: string) => {
+    try {
+      await api("/api/run/collect", { method: "POST", ...(only ? { body: JSON.stringify({ only }) } : {}) });
+      wasRunning.current = true; setPercent(0); setMessage("");
+    } catch (e) { setFailure(true); setMessage(String(e)); }
+    finally { setMenuOpen(false); }
+  };
   const tracked = bloggers.filter(b => b.kind === "blogger"), pending = bloggers.filter(b => b.kind === "blogger_search");
 
   return <Page head="采集" active={section} onPick={key => { setSection(key); setMessage(""); setRunDetail(null); }} items={[
@@ -96,7 +115,14 @@ export default function CollectPage({ current, onUpdate, jumpTo }: { current: Ac
             </p>
           </div>
           {percent === null
-            ? <button className="btn-primary" disabled={archived || busy} onClick={async () => { try { await api("/api/run/collect", { method: "POST" }); wasRunning.current = true; setPercent(0); setMessage(""); } catch (e) { setFailure(true); setMessage(String(e)); } }}>手动采集</button>
+            ? <div className="relative flex" ref={menuRef}>
+              <button className="btn-primary rounded-r-none" disabled={archived || busy} onClick={() => void collect()}>手动采集</button>
+              <button className="btn-primary rounded-l-none border-l border-brand/20 px-2" disabled={archived || busy || !scopeItems.length} aria-label="选择采集范围" aria-expanded={menuOpen}
+                onClick={() => setMenuOpen(v => !v)}><span className={`inline-block text-xs transition-transform ${menuOpen ? "rotate-180" : ""}`}>▾</span></button>
+              {menuOpen && <div className="absolute right-0 top-full z-20 mt-1 min-w-44 overflow-hidden rounded-xl border border-line bg-canvas py-1 shadow-lg">
+                {scopeItems.map(item => <button key={item.key} className="block w-full px-4 py-2 text-left text-sm hover:bg-brand/10" onClick={() => void collect(item.key)}>{item.label}</button>)}
+              </div>}
+            </div>
             : <button className="btn-progress"><span className="absolute inset-0 flex items-center justify-center">{percent}%</span><span className="absolute inset-0 flex items-center justify-center bg-brand text-white transition-[clip-path] duration-500" style={{ clipPath: `inset(0 ${100 - percent}% 0 0)` }}>{percent}%</span></button>}
         </div>
         <div className="mt-4 flex flex-wrap gap-2">

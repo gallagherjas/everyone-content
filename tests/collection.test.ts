@@ -289,3 +289,32 @@ test('博主链路：昵称搜索解析为博主，作品按指数落库并进�
   assert.equal(detail.works[1].publishedAt,'2026-11-03T00:00:00+08:00');assert.equal(detail.trend,null);
  }finally{db.close();}
 });
+test('手动采集按范围独立：topic 只跑话题域，author 只跑达友域',async()=>{
+ const {db,store}=setup();try{
+  config(db,1,{index:{discovery:null,tasks:[]}});
+  db.prepare("INSERT INTO account_sources(account_id,kind,source_key,name) VALUES(1,'keyword','ai教程','ai教程')").run();
+  auth(db,1,'valid');
+  db.prepare("INSERT INTO account_sources(account_id,kind,source_key,name) VALUES(1,'blogger_search','AI 造物笔记','AI 造物笔记')").run();
+  const calls:string[]=[],TOPIC=['get_topic_valid_date','query_topic','itemQuery'],AUTHOR=['get_greater_users_valid_date','get_sug_great_user_list','get_great_user_top_video'];
+  const fetchImpl=async(input: any)=>{
+   const p=new URL(String(input)).pathname;calls.push(p.split('/').pop()!);
+   if(p.endsWith('get_topic_valid_date'))return json({data:{valid_day:'20261105',valid_week:'20261101'}});
+   if(p.endsWith('get_greater_users_valid_date'))return json({data:{datetime:'20261104'}});
+   if(p.endsWith('query_topic'))return json({data:{topic_list:[]}});
+   if(p.endsWith('itemQuery'))return json({data:{data:[]}});
+   if(p.endsWith('get_sug_great_user_list'))return json({data:{userlist:[{user_id:'diguser2',user_name:'AI 造物笔记',follow_count:'13277',aweme_url:'https://www.douyin.com/user/MS4wLjABAAAAWX1'}]}});
+   if(p.endsWith('get_great_user_top_video'))return json({data:{like_list:[{item_id:'7701',video_text:'作品甲 #ai教程',like_cnt:'100',coment_cnt:'5',share_cnt:'2',follow_cnt:'1',rank:1,create_time:'20261101',video_url:'https://www.douyin.com/video/7701'}],comment_list:[],share_list:[],follow_list:[],index_list:[],create_time_list:[]}});
+   throw new Error('unexpected '+p);
+  };
+  // 先独立采达友域：昵称解析为博主、作品落库，同时到期的话题任务不被触碰。
+  const author=await runCollection(store,{accountIds:[1],only:'author',clock:()=>base,fetchImpl,sleep:async()=>{}});
+  assert.equal(author.failed,0);assert.equal(author.completed,3); // author_dates + author_search + author_works
+  assert.equal(calls.filter(p=>AUTHOR.includes(p)).length,3);assert.equal(calls.filter(p=>TOPIC.includes(p)).length,0);
+  assert.equal(db.prepare("SELECT source_key FROM account_sources WHERE kind='blogger'").get().source_key,'diguser2');
+  calls.length=0;
+  // 再独立采话题域：跨日后到期、版本已更新的达友域日期任务不被触碰。
+  const topic=await runCollection(store,{accountIds:[1],only:'topic',clock:()=>base+DAY+60000,fetchImpl,sleep:async()=>{}});
+  assert.equal(topic.failed,0);assert.equal(topic.completed,4); // topic_dates + topic_search + 两个视频窗口
+  assert.equal(calls.filter(p=>TOPIC.includes(p)).length,4);assert.equal(calls.filter(p=>AUTHOR.includes(p)).length,0);
+ }finally{db.close();}
+});

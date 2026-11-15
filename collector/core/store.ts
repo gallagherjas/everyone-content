@@ -5,6 +5,10 @@ import { gzipSync, gunzipSync } from 'node:zlib';
 import type { DatabaseSync } from 'node:sqlite';
 
 export const PROVIDERS = ['index', 'douyin', 'xhs', 'bili'];
+// 采集范围在来源之上把指数拆为话题域与达友域，供手动采集独立触发。
+export const SCOPES = ['index', 'topic', 'author', 'douyin', 'xhs', 'bili'];
+export const taskScope = (task: { provider: string; operation: string }): string =>
+  task.provider !== 'index' ? task.provider : task.operation.startsWith('author_') ? 'author' : 'topic';
 export const hash = (value: any): string => createHash('sha256').update(typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(value)).digest('hex');
 export const stamp = (ms: number): string => new Date(ms).toISOString().slice(0,19).replace('T',' ');
 export const taskKey = (provider: string,scope: string,spec: any): string => hash({provider,scope,type:spec.type,id:spec.id??null,keyword:spec.keyword??null,

@@ -21,7 +21,7 @@ description: 为指定账号连接抖音指数，管理关键词、排除词、�
 
 ## 执行采集
 
-核对该账号的授权与有效关键词。在工作台可进入「采集 → 总览」，点击「手动采集」并查看进度，采集明细在「采集 → 日志」。
+核对该账号的授权与有效关键词。在工作台可进入「采集 → 总览」，点击「手动采集」采集全部到期任务，或经按钮旁的 ▾ 菜单只采某一范围：采集词（话题+视频）、博主追踪或已连接的平台创作后台。进度与采集明细在「采集 → 日志」。
 
 通过 API 执行时，启动前先读取已有采集记录，再按返回的 `run_id` 查询进度，直至当轮结束。读取新增记录和发现结果，按实际情况报告成功、失败、延后或无到期任务，并说明发现结果是否采齐。
 
@@ -35,7 +35,7 @@ npm run collect -- --account=42 --limit=3
 npm run collection:plan -- --account=42
 ```
 
-省略 `--account` 会选中所有活动账号。加上 `--scheduled` 时，按账号的定时开关进一步筛选。
+省略 `--account` 会选中所有活动账号。加上 `--scheduled` 时，按账号的定时开关进一步筛选。加上 `--only` 只采对应范围，取值同本地 API 的 `only`，省略时采全部。
 
 ### 私有文件导入
 
@@ -76,7 +76,7 @@ npm run collection:plan -- --account=42 --auth="/你的私有目录/指数授权
 | `POST /api/bloggers` | 添加博主，提交 `{"keyword":"抖音昵称"}`；解析与首轮作品采集自动进行。 |
 | `PUT /api/bloggers/:id` 或 `DELETE /api/bloggers/:id` | 调整博主采集项或移出。PUT 提交 `{"status":"ready"|"paused"}`、`{"core":true}` 或 `{"info":true}`。 |
 | `GET /api/collection/config` 或 `PUT /api/collection/config` | 从 GET 返回的 `config` 读取设置。排除词字段为 `config.index.discovery.excludeKeywords`。首次保存时将 `config.index.discovery` 设为 `{}`，服务会补齐默认值。编辑 `config.index` 或 `config.schedules` 后，将修改后的完整对象放到 PUT 请求体同名顶层字段。 |
-| `POST /api/run/collect` | 手动运行到期任务，请求体留空。响应包含轮次编号 `run_id`。 |
+| `POST /api/run/collect` | 手动运行到期任务，请求体留空采全部，或提交 `{"only":"<范围>"}` 只采对应范围。范围取值：`topic` 采集词（话题+视频）、`author` 博主追踪、`index` 指数两域全采、`douyin`/`xhs`/`bili` 对应平台快照。响应包含轮次编号 `run_id`。 |
 | `GET /api/collection` | 读取采集记录 `runs`、任务、每日采集次数上限及发现结果。 |
 | `GET /api/collection/progress?run_id=<轮次编号>` | 读取指定轮次的进度和状态。`running` 为 `false` 时，`status` 区分完成 `done`、部分失败 `partial` 和失败 `failed`。省略编号时返回当前账号最近一轮。 |
 | `GET /api/collection/records/:id` 或 `GET /api/collection/records/:id/raw` | 用采集记录编号读取本次入库数据或原始响应。 |

@@ -31,7 +31,7 @@ import { initializationOverview } from '../lib/initialization.ts';
 import { platformLogin, LOGIN_PLATFORMS } from '../lib/platform-login.ts';
 import { monitorOverview } from '../lib/monitor.ts';
 import { noticeOverview } from '../lib/notices.ts';
-import { CollectionStore, PROVIDERS, atomic } from '../collector/core/store.ts';
+import { CollectionStore, PROVIDERS, SCOPES, atomic } from '../collector/core/store.ts';
 import { collectionStatus } from '../collector/core/status.ts';
 import { planCollection } from '../collector/core/planner.ts';
 import { bloggerOverview, bloggerDetail } from '../collector/core/bloggers.ts';
@@ -347,8 +347,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
     if (sources(db, id).some(s => s.kind === 'blogger_search' && s.source_key === keyword))
       throw new InputError('该昵称已在解析中', 409);
     db.prepare("INSERT INTO account_sources(account_id,kind,source_key,name,note) VALUES(?,'blogger_search',?,?,'')").run(id, keyword, keyword);
-    // 立即触发一轮采集解析昵称；若已有采集在跑，搜索任务留给那轮或下一次。
-    try { startTask(db, id, 'collect'); } catch { /* 采集进行中，解析顺延 */ }
+    // 立即触发一轮达友域采集解析昵称；若已有采集在跑，搜索任务留给那轮或下一次。
+    try { startTask(db, id, 'collect', ['--only=author']); } catch { /* 采集进行中，解析顺延 */ }
     return json(res, { ok: true, message: '已登记昵称，解析完成后将出现在列表中。' }, 201);
   }
   const blogger = path.match(/^\/api\/bloggers\/(\d+)$/);
@@ -421,7 +421,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
     const b = await body(req),
       extra: string[] = [];
     if (b.only) {
-      if (!PROVIDERS.includes(b.only)) throw new InputError('采集来源无效');
+      if (!SCOPES.includes(b.only)) throw new InputError('采集范围无效');
       extra.push(`--only=${b.only}`);
     }
     return json(res, startTask(db, id, 'collect', extra), 202);
