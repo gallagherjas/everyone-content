@@ -116,7 +116,7 @@ export class CollectionStore {
     if(task?.lease_owner&&task.lease_owner!==this.owner)return;
     this.db.prepare('UPDATE collection_tasks SET failures=failures+1 WHERE key=?').run(run.task_key);
     const failures=(this.db.prepare('SELECT failures FROM collection_tasks WHERE key=?').get(run.task_key) as any).failures;
-    if(/login_required|rate_limited|payment_required|auth_required|invalid_auth|auth_file|ENOENT/.test(code))this.pause(run.provider,run.scope,code);
+    if(/login_required|rate_limited|payment_required|auth_required|invalid_auth|invalid_user_agent|auth_file|ENOENT/.test(code))this.pause(run.provider,run.scope,code);
     if(/schema_error|decode_error|unsupported_encryption/.test(code))this.db.prepare('UPDATE collection_tasks SET disabled=1 WHERE provider=? AND scope=? AND operation=?').run(run.provider,run.scope,run.operation);
     // 除登录限流(暂停来源)与结构错误(按操作停用)外的错误连续 3 次即停用该任务,不再无限重试;成功清零,重连授权或 resume 恢复。
     if(failures>=3)this.db.prepare('UPDATE collection_tasks SET disabled=1 WHERE key=?').run(run.task_key);

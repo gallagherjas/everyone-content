@@ -12,7 +12,7 @@ description: 为指定账号连接抖音指数，管理关键词、排除词、�
 先读取该账号的授权状态、关键词和采集配置，按用户要求修改或补齐初始化缺项。
 
 1. 优先直接打开抖音创作者中心，提醒用户扫码。或者提醒用户在「采集 → 连接」点击「扫码连接抖音指数」，提示用户在独立的官方登录窗口扫码并完成页面验证。会话保存在本机私有目录，目录权限为 `0700`，文件权限为 `0600`。无需导出 Cookie 或复用已有浏览器资料。
-2. 先根据用户画像，为其推荐5个采集关键词，并询问用户“是否要直接进行配置？有其他关键词也可以向我提供。”并提醒用户，可以在「采集 → 采集词」配置采集词和排除词，增删即时生效并重新筛选。保存后重新读取配置核对。
+2. 先根据用户画像，为其推荐5个采集关键词，并询问用户“是否要直接进行配置？有其他关键词也可以向我提供。”并提醒用户，可以在「采集 → 采集词」配置采集词和排除词，增删即时生效并按已有数据重新筛选。仍命中其他采集词的结果可以继续上榜。保存后重新读取配置核对。
 3. 按用户选择配置定时采集，设置见[请求上限与定时](#请求上限与定时)。
 
 ## 博主追踪
@@ -71,13 +71,13 @@ npm run collection:plan -- --account=42 --auth="/你的私有目录/指数授权
 | `POST /api/auth/index/start` 或 `POST /api/auth/index/cancel` | 打开或取消专用登录窗口。请求体留空。 |
 | `GET /api/sources` | 从 `keywords` 读取本账号关键词。旧版配置的 `config.index.tasks` 中的关键词也可参与采集。 |
 | `POST /api/keywords` | 添加关键词，提交 `{"keyword":"要采集的词"}`。 |
-| `DELETE /api/sources/:id` | 移出关键词。 |
+| `DELETE /api/sources/:id` | 移出关键词，同时清除旧版指数配置中该词对应的任务。 |
 | `GET /api/bloggers` | 读取博主追踪列表，含解析中的昵称与每博主概览。 |
 | `POST /api/bloggers` | 添加博主，提交 `{"keyword":"抖音昵称"}`；解析与首轮作品采集自动进行。 |
 | `PUT /api/bloggers/:id` 或 `DELETE /api/bloggers/:id` | 调整博主采集项或移出。PUT 提交 `{"status":"ready"|"paused"}`、`{"core":true}` 或 `{"info":true}`。 |
 | `GET /api/collection/config` 或 `PUT /api/collection/config` | 从 GET 返回的 `config` 读取设置。排除词字段为 `config.index.discovery.excludeKeywords`。首次保存时将 `config.index.discovery` 设为 `{}`，服务会补齐默认值。编辑 `config.index` 或 `config.schedules` 后，将修改后的完整对象放到 PUT 请求体同名顶层字段。 |
 | `POST /api/run/collect` | 手动运行到期任务，请求体留空采全部，或提交 `{"only":"<范围>"}` 只采对应范围。范围取值：`topic` 采集词（话题+视频）、`author` 博主追踪、`index` 指数两域全采、`douyin`/`xhs`/`bili` 对应平台快照。响应包含轮次编号 `run_id`。 |
 | `GET /api/collection` | 读取采集记录 `runs`、任务、每日采集次数上限及发现结果。 |
-| `GET /api/collection/progress?run_id=<轮次编号>` | 读取指定轮次的进度和状态。`running` 为 `false` 时，`status` 区分完成 `done`、部分失败 `partial` 和失败 `failed`。省略编号时返回当前账号最近一轮。 |
+| `GET /api/collection/progress?run_id=<轮次编号>` | 读取指定轮次的进度和状态。结束后的 `status` 为完成 `done`、部分失败 `partial`、失败 `failed`、已有结果且部分延后 `done_with_deferred`、延后 `deferred`、复用缓存 `cached` 或无可执行任务 `empty`。省略编号时返回当前账号最近一轮。 |
 | `GET /api/collection/records/:id` 或 `GET /api/collection/records/:id/raw` | 用采集记录编号读取本次入库数据或原始响应。 |
 | `POST /api/collection/resume` | 解除本账号指数任务的暂停，提交 `{"provider":"index"}`。 |

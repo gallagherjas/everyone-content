@@ -5,16 +5,26 @@ import { Page } from "../components/Layout";
 import PlatformAuthorization from "../components/PlatformAuthorization";
 import CollectionSchedule from "../components/CollectionSchedule";
 import ExcludeKeywords from "../components/ExcludeKeywords";
-import { names, reason, statuses } from "../labels";
+import { names, operations, reason, statuses } from "../labels";
 import { useCachedLoad, useInvalidatePages, usePageVisible, KeepAlive } from "../components/PageCache";
 import Pager, { usePaged } from "../components/Pager";
 
 interface Run { id: number; provider: string; operation: string; target: string; status: string; observed_at: string; version: string | null; error: string | null }
 interface State { runs: Run[]; budgets: { provider: string; daily_limit: number; used: number }[]; credentials: Record<string, boolean>; queue: { total: number; due: number } }
+interface Progress { run_id: number | null; running: boolean; progress: number | null; status: string | null }
 interface Source { id: number; name: string }
 interface BloggerRow { id: number; kind: "blogger" | "blogger_search"; name: string; status: string; resolving?: boolean; options?: { core?: boolean; info?: boolean }; lastCollectAt?: string | null }
 
 const RUN_TONE: Record<string, BadgeTone> = { ok: "up", failed: "danger", running: "warn", cached: "gray", deferred: "warn" };
+const OUTCOME: Record<string, string> = {
+  done: "采集完成，结果已更新。",
+  partial: "本轮部分采集失败。请在「日志」查看失败原因。",
+  failed: "本轮采集失败。请在「日志」查看失败原因。",
+  done_with_deferred: "本轮已有结果更新，部分任务延后。请在「日志」查看记录。",
+  deferred: "本轮任务延后。请在「日志」查看记录，等到可采时间后再试。",
+  cached: "已复用已有数据，本轮没有新增快照。",
+  empty: "本轮没有可执行的采集任务。",
+};
 
 /** 单个来源的今日额度卡：用量/上限 + 细进度条；未连接的来源弱化展示 */
 function BudgetCard({ label, used, limit, connected }: { label: string; used: number; limit: number; connected: boolean }) {
@@ -29,14 +39,14 @@ export default function CollectPage({ current, onUpdate, jumpTo }: { current: Ac
   const api = useApi(), archived = current.status === "archived";
   const visible = usePageVisible(), invalidate = useInvalidatePages();
   const [section, setSection] = useState("overview");
-  // 横幅「去连接」的深链：令牌对象更新时切到对应小节。
+  // 提醒中的操作可以直接打开连接或日志。
   useEffect(() => { if (jumpTo?.section) setSection(jumpTo.section); }, [jumpTo]);
   const [state, setState] = useState<State | null>(null), [percent, setPercent] = useState<number | null>(null);
   const [src, setSrc] = useState<{ keywords: Source[] }>({ keywords: [] }), [keyword, setKeyword] = useState(""), [bloggerName, setBloggerName] = useState("");
   const [bloggers, setBloggers] = useState<BloggerRow[]>([]);
   const [runDetail, setRunDetail] = useState<{ id: number; text: string } | null>(null);
   const [busy, setBusy] = useState(false), [failure, setFailure] = useState(false), [message, setMessage] = useState(""), [menuOpen, setMenuOpen] = useState(false);
-  const lastRuns = useRef<string | null>(null), wasRunning = useRef(false), menuRef = useRef<HTMLDivElement>(null);
+  const lastRuns = useRef<string | null>(null), activeRun = useRef<number | null>(null), menuRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(() => api<State>("/api/collection").then(value => {
     setState(value);
@@ -57,16 +67,25 @@ export default function CollectPage({ current, onUpdate, jumpTo }: { current: Ac
   // 采集进度轮询：完成后广播刷新各数据页，这里也是全工作台唯一的完成信号源。
   useEffect(() => {
     if (!visible) return; let alive = true;
-    const poll = () => api<{ running: boolean; progress: number | null }>("/api/collection/progress").then(p => {
-      if (!alive) return;
-      setPercent(p.running ? (p.progress ?? 0) : null);
-      if (p.running) wasRunning.current = true;
-      else if (wasRunning.current) { wasRunning.current = false; load(); invalidate(['bloggers', 'monitor', 'sources']); setMessage("采集完成，结果已更新。"); }
-    }).catch(() => {});
+    const poll = () => {
+      const requested = activeRun.current;
+      const suffix = requested === null ? "" : `?run_id=${requested}`;
+      return api<Progress>(`/api/collection/progress${suffix}`).then(p => {
+        if (!alive || requested !== activeRun.current) return;
+        setPercent(p.running ? (p.progress ?? 0) : null);
+        if (p.running) activeRun.current = p.run_id;
+        else if (requested !== null) {
+          activeRun.current = null;
+          invalidate();
+          setFailure(p.status === "partial" || p.status === "failed");
+          setMessage(p.status ? OUTCOME[p.status] ?? "采集已结束。请查看日志确认结果。" : "采集已结束。请查看日志确认结果。");
+        }
+      }).catch(() => {});
+    };
     poll();
     const timer = setInterval(poll, 1500);
     return () => { alive = false; clearInterval(timer); };
-  }, [visible, load, invalidate, api]);
+  }, [visible, invalidate, api]);
   useEffect(() => { if (!visible) return; const timer = setInterval(load, 10000); return () => clearInterval(timer); }, [visible, load]);
   // 采集范围下拉菜单：点击外部关闭。
   useEffect(() => {
@@ -82,6 +101,14 @@ export default function CollectPage({ current, onUpdate, jumpTo }: { current: Ac
     catch (e) { setFailure(true); setMessage(String(e)); }
     finally { setBusy(false); }
   };
+  const addKeyword = () => {
+    if (archived || !keyword.trim()) return;
+    void action(async () => {
+      await api("/api/keywords", { method: "POST", body: JSON.stringify({ keyword }) });
+      setKeyword("");
+      invalidate(["collection", "sources"]);
+    }, "已保存并重新筛选。");
+  };
   const runPage = usePaged(state?.runs ?? []);
   // 独立采集范围：指数两域与已连接平台；主按钮仍为全部采集。
   const scopeItems = [
@@ -89,11 +116,13 @@ export default function CollectPage({ current, onUpdate, jumpTo }: { current: Ac
     ...(["douyin", "xhs", "bili"] as const).filter(p => state?.credentials?.[p]).map(p => ({ key: p, label: names[p] })),
   ];
   const collect = async (only?: string) => {
+    if (busy) return;
+    setBusy(true); setFailure(false); setMessage("");
     try {
-      await api("/api/run/collect", { method: "POST", ...(only ? { body: JSON.stringify({ only }) } : {}) });
-      wasRunning.current = true; setPercent(0); setMessage("");
+      const started = await api<{ run_id: number }>("/api/run/collect", { method: "POST", ...(only ? { body: JSON.stringify({ only }) } : {}) });
+      activeRun.current = started.run_id; setPercent(0);
     } catch (e) { setFailure(true); setMessage(String(e)); }
-    finally { setMenuOpen(false); }
+    finally { setMenuOpen(false); setBusy(false); }
   };
   const tracked = bloggers.filter(b => b.kind === "blogger"), pending = bloggers.filter(b => b.kind === "blogger_search");
 
@@ -150,14 +179,17 @@ export default function CollectPage({ current, onUpdate, jumpTo }: { current: Ac
           <p className="text-xs leading-6 text-muted">用于抖音指数的话题与视频查询，每个关键词每天消耗 3 次额度。</p>
           <div className="flex gap-2">
             <input id="source-keyword" className="field flex-1" value={keyword} onChange={e => setKeyword(e.target.value)} placeholder="例如：效率工具、职场技能、日常生活" aria-label="新增关键词" maxLength={80} disabled={archived}
-              onKeyDown={e => { if (e.key === "Enter" && !e.nativeEvent.isComposing) void action(async () => { await api("/api/keywords", { method: "POST", body: JSON.stringify({ keyword }) }); setKeyword(""); load(); }, "已添加关键词。"); }} />
+              onKeyDown={e => { if (e.key === "Enter" && !e.nativeEvent.isComposing) addKeyword(); }} />
             <button className="btn-primary shrink-0" disabled={archived || busy || !keyword.trim()}
-              onClick={() => void action(async () => { await api("/api/keywords", { method: "POST", body: JSON.stringify({ keyword }) }); setKeyword(""); load(); }, "已添加关键词。")}>添加</button>
+              onClick={addKeyword}>添加</button>
           </div>
           <div className="flex flex-wrap gap-2">{src.keywords.map(s => <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-line bg-canvas pl-3 pr-1 text-sm" key={s.id}>
             <span className="break-all">{s.name}</span>
             <button type="button" className="rounded-full px-2 py-1 text-muted hover:text-danger disabled:opacity-40" aria-label={`移除关键词“${s.name}”`} disabled={archived || busy}
-              onClick={() => void action(async () => { await api(`/api/sources/${s.id}`, { method: "DELETE" }); load(); }, "已移出。")}>×</button>
+              onClick={() => void action(async () => {
+                await api(`/api/sources/${s.id}`, { method: "DELETE" });
+                invalidate(["collection", "sources"]);
+              }, "已移出关键词并重新筛选。")}>×</button>
           </span>)}{!src.keywords.length && <p className="text-sm text-muted">尚未添加</p>}</div>
         </div>
         <ExcludeKeywords disabled={archived} />
@@ -202,14 +234,13 @@ export default function CollectPage({ current, onUpdate, jumpTo }: { current: Ac
           <div className="flex flex-wrap items-center justify-between gap-2 tabular-nums">
             <span className="flex min-w-0 items-baseline gap-2">
               <span className="w-24 shrink-0 text-muted">{names[r.provider]}</span>
-              <span className="w-28 shrink-0 text-muted">{r.operation}</span>
-              <span className="min-w-0 flex-1 truncate font-medium text-ink">{r.target}</span>
+              <span className="w-28 shrink-0 text-muted">{operations[r.operation] ?? r.operation}</span>
+              {r.target !== r.operation && <span className="min-w-0 flex-1 truncate font-medium text-ink">{r.target}</span>}
             </span>
             <span className="flex shrink-0 items-center gap-2 text-xs text-muted">
               <span className="w-36">{fmtTime(r.observed_at)}</span>
               {r.version && <span className="w-32">数据版本 {r.version}</span>}
               <Badge tone={RUN_TONE[r.status] ?? "gray"}>{statuses[r.status] ?? r.status}</Badge>
-              {r.error && <span className="max-w-48 truncate text-danger">{reason(r.error)}</span>}
               {r.status === "ok" && <a className="link ml-1" href="#" onClick={e => {
                 e.preventDefault();
                 if (runDetail?.id === r.id) { setRunDetail(null); return; }
@@ -219,6 +250,7 @@ export default function CollectPage({ current, onUpdate, jumpTo }: { current: Ac
               }}>{runDetail?.id === r.id ? '收起记录' : '查看记录'}</a>}
             </span>
           </div>
+          {r.error && <p className={`mt-1 break-words text-xs leading-5 ${r.status === "failed" ? "text-danger" : "text-muted"}`} title={r.error}>{reason(r.error)}</p>}
           {runDetail?.id === r.id && <div className="codebox mt-2 max-h-96">{runDetail.text}</div>}
         </div>)}</div>
         {!state?.runs.length && <p className="py-4 text-sm text-muted">尚无采集记录；手动采集后生成。</p>}

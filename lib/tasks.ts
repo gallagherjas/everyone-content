@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { DATA } from './strategies.ts';
 import { type Account } from './accounts.ts';
+import type { CollectionOutcome } from '../collector/core/status.ts';
 
 export function lock(task: string) {
   mkdirSync(DATA, { recursive: true });
@@ -34,7 +35,7 @@ export async function withTask(
   db: DatabaseSync,
   a: Account,
   task: string,
-  fn: (log: (text: string) => void) => Promise<void | 'partial'>,
+  fn: (log: (text: string) => void) => Promise<CollectionOutcome>,
 ) {
   const existing = Number(process.env.EVERYONE_CONTENT_RUN_ID);
   const id =
@@ -52,7 +53,7 @@ export async function withTask(
   try {
     const result = await fn(log);
     db.prepare("UPDATE task_runs SET status=?,finished_at=datetime('now') WHERE id=? AND account_id=?").run(
-      result || 'done',
+      result,
       id,
       a.id,
     );

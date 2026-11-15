@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useApi } from '../api';
 import { Msg } from './Common';
-import { useInvalidatePages, usePageVisible } from './PageCache';
+import { useCachedLoad, useInvalidatePages, usePageVisible } from './PageCache';
 
-interface AuthState { provider: string; label: string; status: string; configured: boolean; message: string }
+interface AuthState { provider: string; label: string; status: string; configured: boolean; message: string; attempt_message?: string | null }
 const PLATFORMS: { provider: string; label: string; hint: string }[] = [
   { provider: 'index', label: '抖音指数', hint: '按关键词发现话题、视频和达人指数。' },
-  { provider: 'douyin', label: '抖音创作后台', hint: '快照粉丝、获赞、作品与播放数据。' },
-  { provider: 'xhs', label: '小红书创作服务', hint: '快照粉丝与笔记数据。' },
-  { provider: 'bili', label: 'B站创作中心', hint: '快照粉丝、播放与稿件数据。' },
+  { provider: 'douyin', label: '抖音创作后台', hint: '采集账号粉丝和获赞快照。' },
+  { provider: 'xhs', label: '小红书创作服务', hint: '采集账号粉丝和获赞快照。' },
+  { provider: 'bili', label: 'B站创作中心', hint: '连接后需通过实采验证数据读取。' },
 ];
+const connecting = (status?: string) => status === 'preparing' || status === 'waiting';
 
 /** 采集设置的平台连接:每个平台独立扫码,会话保存在本机并绑定当前账号。 */
 export default function PlatformAuthorization({ disabled }: { disabled: boolean }) {
@@ -21,14 +22,14 @@ export default function PlatformAuthorization({ disabled }: { disabled: boolean 
       .then(all => setStates(all))
       .catch(value => setError(String(value)));
   }, [api]);
-  useEffect(() => { if (visible) void load(); }, [visible, load]);
-  const anyRunning = states.some(s => ['preparing', 'waiting'].includes(s.status));
+  useCachedLoad('collection', load);
+  const anyRunning = states.some(s => connecting(s.status));
   useEffect(() => {
     if (!visible || !anyRunning) return;
     const timer = setInterval(() => {
       Promise.all(PLATFORMS.map(p => api<AuthState>(`/api/auth/${p.provider}`))).then(all => {
         setStates(all);
-        if (all.some(s => s.status === 'configured')) invalidate();
+        if (!all.some(s => connecting(s.status))) invalidate();
       }).catch(value => setError(String(value)));
     }, 1000);
     return () => clearInterval(timer);
@@ -48,7 +49,6 @@ export default function PlatformAuthorization({ disabled }: { disabled: boolean 
     <div className="space-y-3">
       {PLATFORMS.map(p => {
         const state = states.find(s => s.provider === p.provider);
-        const connecting = ['preparing', 'waiting'].includes(state?.status ?? '');
         return <div key={p.provider} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line/70 bg-canvas px-4 py-3">
           <div className="min-w-0">
             <p className="text-sm">{p.label}</p>
@@ -56,7 +56,8 @@ export default function PlatformAuthorization({ disabled }: { disabled: boolean 
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <span className="text-sm text-muted" aria-label={`${p.label}登录状态`}>{state?.message ?? '正在检查连接状态…'}</span>
-            {connecting
+            {state?.attempt_message && <span className="text-xs text-warn">{state.attempt_message}</span>}
+            {connecting(state?.status)
               ? <button className="btn" disabled={busy !== ''} onClick={() => action(p.provider, 'cancel')}>取消登录</button>
               : <button className="btn-primary" disabled={disabled || busy !== '' || !state} onClick={() => action(p.provider, 'start')}>{state?.configured ? '重新登录' : '扫码连接'}</button>}
           </div>

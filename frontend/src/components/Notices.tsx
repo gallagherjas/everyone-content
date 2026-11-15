@@ -1,9 +1,12 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { AccountContext, useApi } from "../api";
 import { names, reason } from "../labels";
 import { usePageVersions } from "./PageCache";
 
-interface Issue { kind: "paused" | "disabled" | "run_failed"; provider?: string; error?: string; count?: number }
+type Issue =
+  | { kind: "paused"; provider: string; error: string }
+  | { kind: "disabled"; error: string; count: number }
+  | { kind: "run_failed" | "run_partial" };
 interface NoticesData {
   auth: { provider: string }[];
   issues: Issue[];
@@ -24,20 +27,17 @@ interface NoticesState {
   issues: Issue[];
   bloggers: BloggerRow[];
   bloggerCount: number;
-  collectIssue: number;
   markBloggerSeen: (id: number) => void;
 }
-const NoticesState = createContext<NoticesState>({ auth: [], issues: [], bloggers: [], bloggerCount: 0, collectIssue: 0, markBloggerSeen: () => {} });
+const NoticesState = createContext<NoticesState>({ auth: [], issues: [], bloggers: [], bloggerCount: 0, markBloggerSeen: () => {} });
 
-/** 采集异常的悬浮明细文案(采集页红点用)，与横幅共用 names/reason 口径 */
-export const issueText = (auth: NoticesData["auth"], issues: Issue[]) => [
-  ...auth.map((a) => `${names[a.provider] ?? a.provider}登录已失效，请重新连接`),
-  ...issues.map((i) => i.kind === "paused" ? `${names[i.provider!] ?? i.provider}采集暂停：${reason(i.error ?? null) ?? i.error}`
-    : i.kind === "disabled" ? `${i.count} 个采集任务被禁用（${reason(i.error ?? null) ?? i.error}）`
-    : "最近一轮采集失败，可到「日志」查看"),
-].join("；");
+function describeIssue(issue: Issue) {
+  if (issue.kind === "paused") return { title: `${names[issue.provider] ?? issue.provider}采集已暂停`, detail: reason(issue.error) };
+  if (issue.kind === "disabled") return { title: `${issue.count} 个采集任务已停用`, detail: reason(issue.error) };
+  return { title: issue.kind === "run_partial" ? "最近一轮部分采集失败" : "最近一轮采集失败", detail: null };
+}
 
-/** 提醒中心：轮询 /api/notices 派生红点与横幅素材；博主红点按博主记水位，点开详情才算已读 */
+/** 轮询异常状态与博主新作品，博主详情打开时记录已读水位。 */
 export function NoticesProvider({ children }: { children: ReactNode }) {
   // 提醒中心只挂在账号工作区内，账号上下文必为当前账号编号。
   const accountId = useContext(AccountContext)!;
@@ -82,21 +82,72 @@ export function NoticesProvider({ children }: { children: ReactNode }) {
     issues: data?.issues ?? [],
     bloggers,
     bloggerCount: bloggers.reduce((n, b) => n + b.count, 0),
-    collectIssue: (data?.auth.length ?? 0) + (data?.issues.length ?? 0),
     markBloggerSeen,
   }), [data, bloggers, markBloggerSeen]);
   return <NoticesState.Provider value={value}>{children}</NoticesState.Provider>;
 }
 export const useNotices = () => useContext(NoticesState);
 
-/** 登录失效横幅：常驻直到重新连接，按钮直达「采集 → 连接」。 */
-export function NoticeBanner({ onConnect }: { onConnect: () => void }) {
-  const { auth } = useNotices();
-  if (!auth.length) return null;
-  const label = names[auth[0].provider] ?? auth[0].provider;
-  return <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-warn/10 px-4 py-2.5 text-sm text-warn">
-    <span>{auth.length > 1 ? `${label} 等 ${auth.length} 个平台登录已失效，相关采集已暂停。` : `${label}登录已失效，相关采集已暂停。`}</span>
-    <button type="button" onClick={onConnect}
-      className="shrink-0 rounded-xl border border-warn/50 px-3.5 py-1 text-xs text-warn transition hover:bg-warn/15">去连接</button>
+export function NoticeMenu({ onAction }: { onAction: (section: "auth" | "logs") => void }) {
+  const { auth, issues } = useNotices();
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  const container = useRef<HTMLDivElement>(null), trigger = useRef<HTMLButtonElement>(null);
+  const hasIssues = auth.length > 0 || issues.length > 0;
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && !container.current?.contains(event.target)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      trigger.current?.focus();
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+  const goTo = (section: "auth" | "logs") => {
+    setOpen(false);
+    trigger.current?.focus();
+    onAction(section);
+  };
+  return <div ref={container} className="relative col-start-2 row-start-1 ml-auto shrink-0 self-center">
+    <button ref={trigger} type="button" aria-label="提醒" aria-description={hasIssues ? "有待处理的异常" : undefined}
+      aria-controls={id} aria-expanded={open} onClick={() => setOpen(value => !value)}
+      className="relative grid size-10 place-items-center rounded-lg text-ink transition-colors hover:text-brand focus-visible:outline-2 focus-visible:outline-brand aria-expanded:text-brand">
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="size-5">
+        <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" />
+      </svg>
+      {hasIssues && <span aria-hidden="true" className="absolute right-2 top-1.5 size-2 rounded-full bg-danger" />}
+    </button>
+    <section id={id} hidden={!open} aria-label="异常提醒"
+      className="absolute right-0 top-full z-10 mt-2 max-h-[min(26rem,65vh)] w-[min(22rem,calc(100vw-2rem))] space-y-3 overflow-auto rounded-2xl border border-line bg-card p-4 shadow-lg">
+      <h2 className="text-sm font-semibold">提醒</h2>
+      {hasIssues ? <ul className="divide-y divide-line">
+        {auth.map(({ provider }) => <li key={provider} className="flex items-center justify-between gap-3 py-2.5">
+          <div className="min-w-0 text-sm">
+            <p>{names[provider] ?? provider}登录已失效</p>
+            <p className="mt-0.5 text-xs text-muted">相关采集已暂停。</p>
+          </div>
+          <button className="btn-sm shrink-0" type="button" onClick={() => goTo("auth")}>去连接</button>
+        </li>)}
+        {issues.map(issue => {
+          const { title, detail } = describeIssue(issue);
+          return <li key={issue.kind === "paused" ? issue.provider + "-paused" : issue.kind === "disabled" ? issue.error + "-disabled" : issue.kind}
+            className="flex items-center justify-between gap-3 py-2.5">
+            <div className="min-w-0 text-sm">
+              <p>{title}</p>
+              {detail && <p className="mt-0.5 text-xs leading-5 text-muted">{detail}</p>}
+            </div>
+            <button className="btn-sm shrink-0" type="button" onClick={() => goTo("logs")}>查看日志</button>
+          </li>;
+        })}
+      </ul> : <p className="text-sm text-muted">暂无异常。</p>}
+    </section>
   </div>;
 }

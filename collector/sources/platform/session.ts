@@ -21,9 +21,10 @@ export function loadSession(file: string | undefined, env: Record<string, string
     const stat = statSync(file);
     // POSIX 校验组/其他位;Windows 的 mode 恒为 0666/0444,权限由用户目录 ACL 保证,跳过位检查。
     if (!stat.isFile() || (process.platform !== 'win32' && (stat.mode & 0o077))) throw new Error('auth_file_must_be_private_0600');
-    auth = JSON.parse(readFileSync(file, 'utf8'));
+    const text = readFileSync(file, 'utf8');
+    try { auth = JSON.parse(text); } catch { throw new Error('invalid_auth_cookie'); }
   }
-  if (typeof auth.cookie !== 'string' || !auth.cookie.trim() || /[\r\n]/.test(auth.cookie)) throw new Error('invalid_auth_cookie');
+  if (typeof auth?.cookie !== 'string' || !auth.cookie.trim() || /[\r\n]/.test(auth.cookie)) throw new Error('invalid_auth_cookie');
   if (auth.userAgent !== undefined && (typeof auth.userAgent !== 'string' || /[\r\n]/.test(auth.userAgent))) throw new Error('invalid_user_agent');
   return auth;
 }

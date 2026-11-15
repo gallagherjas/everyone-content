@@ -39,7 +39,7 @@ npm run build:web
 npm run web
 ```
 
-Open http://127.0.0.1:8788 and enter a name in the workbench to create an account. If the port is in use, follow [`.env.example`](.env.example) and set `WEB_PORT=8789` in the project directory's `.env` file. Start the server and open http://127.0.0.1:8789.
+Open http://127.0.0.1:8788. On first use, enter a name to create an account. Opening an existing workbench in a new browser selects the first active account when available. Use Account → Account Management to switch. If the port is in use, follow [`.env.example`](.env.example) and set `WEB_PORT=8789` in the project directory's `.env` file. Start the server and open http://127.0.0.1:8789.
 
 Open an agent conversation in the project directory and try either of these requests.
 

@@ -14,7 +14,8 @@ const {CollectionStore,hash}=await import('../collector/core/store.ts');
 const {runCollection}=await import('../collector/core/runner.ts');
 const {planCollection}=await import('../collector/core/planner.ts');
 const {registerAuth,configureIndex}=await import('../collector/core/settings.ts');
-const {collectionStatus}=await import('../collector/core/status.ts');
+const {collectionStatus,collectionOutcome}=await import('../collector/core/status.ts');
+const {connectionStatus}=await import('../lib/platform-login.ts');
 const {bloggerOverview,bloggerDetail}=await import('../collector/core/bloggers.ts');
 const {defaultSchedules}=await import('../lib/collection-schedule.ts');
 const DAY=86400000,HOUR=3600000,base=Date.UTC(2026,10,7,2);
@@ -75,6 +76,7 @@ test('平台快照遇请求间隔即延后到窗口时刻，不占额度不睡�
   const opts={accountIds:[1],only:'douyin',clock:()=>base+1000,fetchImpl,sleep:async()=>{}};
   const first=await runCollection(store,opts);
   assert.equal(first.deferred,1);assert.equal(first.completed,0);
+  assert.equal(collectionOutcome(first.accounts[1]),'deferred');
   const task=db.prepare('SELECT error,next_run_at FROM collection_tasks WHERE provider=?').get('douyin');
   assert.equal(task.error,'interval_pending');assert.equal(task.next_run_at,base+3600000);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM collection_requests WHERE provider='douyin'").get().n,0);
@@ -82,6 +84,37 @@ test('平台快照遇请求间隔即延后到窗口时刻，不占额度不睡�
   assert.equal(later.completed,1);
   assert.equal(db.prepare("SELECT failures,error FROM collection_tasks WHERE provider='douyin'").get().failures,0);
  }finally{db.close();}
+});
+test('重连同日仍实采验证，未登录响应暂停对应来源，其他平台可正常完成',async()=>{
+  const {db,store}=setup();
+  try {
+    const file=join(root,'snapshot-verification-auth.json');
+    writeFileSync(file,JSON.stringify({cookie:'synthetic-session'}),{mode:0o600});
+    registerAuth(store,1,file,'douyin');
+    registerAuth(store,1,file,'xhs');
+    assert.equal(connectionStatus(db,1,'douyin').status,'configured');
+    const opts={accountIds:[1],clock:()=>base, sleep:async()=>{}};
+    const first=await runCollection(store,{...opts,only:'douyin',fetchImpl:async()=>json({user_profile:{follower_count:3}})});
+    assert.equal(collectionOutcome(first.accounts[1]),'done');
+    assert.equal(collectionStatus(db,account(db,1),store).runs[0].status,'ok');
+    assert.equal(connectionStatus(db,1,'douyin').status,'verified');
+
+    registerAuth(store,1,file,'douyin');
+    assert.equal(connectionStatus(db,1,'douyin').status,'configured');
+    const fetchImpl=async input=>new URL(String(input)).hostname==='creator.douyin.com'
+      ? json({status_code:8,status_msg:'用户未登录'})
+      : json({code:0,success:true,data:{fans_count:5,faved_count:10}});
+    const next=await runCollection(store,{...opts,clock:()=>base+1000,fetchImpl});
+    assert.deepEqual(next.accounts[1],{completed:1,cached:0,failed:1,deferred:0});
+    assert.equal(collectionOutcome(next.accounts[1]),'partial');
+    const state=collectionStatus(db,account(db,1),store);
+    assert.equal(state.runs.find(r=>r.provider==='douyin').error,'login_required');
+    assert.equal(state.tasks.find(t=>t.provider==='douyin').disabled,0);
+    assert.deepEqual(connectionStatus(db,1,'douyin'),{status:'expired',configured:true,paused:true,error:'login_required'});
+    assert.equal(connectionStatus(db,1,'xhs').status,'verified');
+    const idle=await runCollection(store,{...opts,clock:()=>base+2000,fetchImpl:()=>assert.fail('不应发起请求')});
+    assert.equal(collectionOutcome(idle.accounts[1]),'empty');
+  } finally {db.close();}
 });
 test('未登记授权不排指数任务也不伪造失败；登记后立即参与采集',async()=>{
  const {db,store}=setup();try{
@@ -239,6 +272,9 @@ test('指数全量入选并按榜单展示，排除词即时生效；历史记�
   planCollection(store,{accountIds:[1],now});
   assert.equal(collectionStatus(db,account(db,1),store).discovery.topics.length,4); // 排除词即时生效
   assert.equal(db.prepare("SELECT COUNT(*) n FROM collection_tasks t JOIN collection_task_accounts a ON a.task_key=t.key WHERE a.account_id=1 AND t.operation='topic_relation'").get().n,0);
+  db.prepare("DELETE FROM account_sources WHERE account_id=1 AND kind='keyword'").run();
+  const filtered=collectionStatus(db,account(db,1),store).discovery;
+  assert.deepEqual([filtered.keywords,filtered.topics,filtered.videos,filtered.authors],[[],[],[],[]]);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM collection_runs').get().n,before);
  }finally{db.close();}
 });

@@ -18,14 +18,18 @@ interface State {credentials:Record<string,boolean>;runs:{id:number;status:strin
 export default function CollectionPage() {
   const api=useApi();
   const [state,setState]=useState<State|null>(null),[view,setView]=useState("discovery"),[videoSort,setVideoSort]=useState<"7"|"30">("30"),[videoBadge,setVideoBadge]=useState("");
-  const visible=usePageVisible(),invalidate=useInvalidatePages(),lastRuns=useRef<string|null>(null);
+  const visible=usePageVisible(),invalidate=useInvalidatePages(),lastRuns=useRef<string|null>(null),lastRequest=useRef(0);
   // 本页是采集数据的常驻轮询者：记录变化时广播刷新监控等其他数据页。
-  const refresh=useCallback(()=>{api<State>("/api/collection").then(value=>{
-    setState(value);
-    const runs=value.runs.map(run=>`${run.id}:${run.status}`).join(',');
-    if(lastRuns.current!==null&&lastRuns.current!==runs)invalidate(['monitor','sources']);
-    lastRuns.current=runs;
-  }).catch(()=>{});},[api,invalidate]);
+  const refresh=useCallback(()=>{
+    const request=++lastRequest.current;
+    api<State>("/api/collection").then(value=>{
+      if(request!==lastRequest.current)return;
+      setState(value);
+      const runs=value.runs.map(run=>`${run.id}:${run.status}`).join(',');
+      if(lastRuns.current!==null&&lastRuns.current!==runs)invalidate(['monitor','sources']);
+      lastRuns.current=runs;
+    }).catch(()=>{});
+  },[api,invalidate]);
   useCachedLoad('collection',refresh);
   useEffect(()=>{if(!visible)return;const timer=setInterval(refresh,10000);return()=>clearInterval(timer);},[visible,refresh]);
   const discovery=state?.discovery,videos=discovery?.videos??[];

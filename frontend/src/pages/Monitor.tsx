@@ -1,7 +1,6 @@
 import { useCallback, useState, type ReactNode } from "react";
 import { useApi, fmtNum } from "../api";
 import { Badge, type BadgeTone } from "../components/Common";
-import { formatTime } from "../../../lib/time";
 import { useCachedLoad } from "../components/PageCache";
 import { Sparkline } from "../components/Sparkline";
 
@@ -16,7 +15,7 @@ const INSIGHT_TONES: Record<string, BadgeTone> = {};
 
 interface Point { at: string; fans: number | null; likes: number | null; views: number | null }
 interface PlatformData {
-  configured: boolean; paused: boolean; error: string | null;
+  configured: boolean; paused: boolean; status: string;
   latest: { at: string; fans: number | null; likes: number | null; works: number | null; views: number | null } | null;
   deltaToday: number | null; delta7d: number | null; series: Point[];
 }
@@ -29,7 +28,12 @@ const Delta = ({ value }: { value: number | null }) =>
   value == null ? <span className="text-xs text-faint">待下次快照</span>
     : <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-xs leading-4 ${value >= 0 ? "bg-up/10 text-up" : "bg-danger/10 text-danger"}`}>{value >= 0 ? "+" : ""}{fmtNum(value)}</span>;
 
-const stateText = (p: PlatformData) => (p.configured ? (p.paused ? "登录失效" : "已连接") : "未连接");
+const stateText = (p: PlatformData) => {
+  if (p.status === "expired") return "需重新连接";
+  if (p.paused) return "采集暂停";
+  if (p.status === "verified") return "已验证";
+  return p.configured ? "待实采验证" : "未连接";
+};
 /** 速览文案里的动态数值与平台名:墨色中量字重,与灰色模板文字区分 */
 const Em = ({ children }: { children: ReactNode }) => <span className="font-medium text-ink">{children}</span>;
 const signed = (v: number | null) => v == null ? "—" : <span className={v >= 0 ? "text-up" : "text-danger"}>{v >= 0 ? "+" : ""}{fmtNum(v)}</span>;
@@ -149,8 +153,7 @@ export default function MonitorPage() {
     return cur == null || base == null ? null : cur - base;
   };
   const totalWinFans = rows.reduce((n, r) => { const d = winDelta(r, "fans"); return d == null ? n : n + d; }, 0);
-  // 数据速览:恒定 5 行、每行独立容器;全部由每日序列实时计算,动态数值与平台名以墨色强调,模板文字保持灰。
-  const today = formatTime(Date.now()).slice(0, 10);
+  // 数据速览从日快照计算，动态数值和平台名用墨色强调。
   const netTotals = netDates.map((at, d) => ({ at, total: netRows.reduce((n, r) => n + (r.values[d] ?? 0), 0) }));
   const down = netTotals.filter(x => x.total < 0);
   const worstDown = down.length ? down.reduce((a, b) => b.total < a.total ? b : a) : null;
@@ -159,9 +162,6 @@ export default function MonitorPage() {
     .map(p => ({ key: p.key, perLike: p.latest!.likes! / p.latest!.works!, perView: p.latest!.views! / p.latest!.works! }));
   const likeBest = eff.length ? eff.slice().sort((a, b) => b.perLike - a.perLike)[0] : null;
   const viewBest = eff.length ? eff.slice().sort((a, b) => b.perView - a.perView)[0] : null;
-  const paused = platforms.filter(p => p.configured && p.paused).map(p => `${META[p.key].label}的登录已失效`);
-  const stale = platforms.filter(p => p.configured && p.latest && p.latest.at < today).map(p => `${META[p.key].label}停留在 ${p.latest!.at.slice(5)}`);
-  const issues = [...paused.map(t => `${t}，采集已暂停`), ...stale.map(t => `${t}，今日无快照`)];
   const insightRows: { tag: string; tone: BadgeTone; text: ReactNode }[] = [
     netTotals.length >= 14
       ? (() => {
@@ -186,9 +186,6 @@ export default function MonitorPage() {
         return { tag: "峰值", tone: "blue" as BadgeTone, text: <>单日净增峰值 <Em>+{fmtNum(peak!.total)}</Em>（<Em>{META[(day?.key ?? "douyin") as Provider].label} · {peak!.at.slice(5)}</Em>）。</> };
       })()
       : { tag: "峰值", tone: "blue", text: "暂无数据。" },
-    issues.length
-      ? { tag: "异常", tone: "danger", text: <Em>{issues.join("；")}</Em> }
-      : { tag: "异常", tone: "danger", text: "未检测到异常，各平台连接与采集状态正常。" },
   ];
   return <div className="space-y-5">
     <div className="grid gap-5 lg:grid-cols-2">
@@ -216,7 +213,7 @@ export default function MonitorPage() {
       </section>
       <section className="panel flex h-[276px] flex-col">
         <h2 className="text-lg font-semibold">数据速览</h2>
-        {/* 恒定 5 行,行容器在固定卡内均匀分布,恰好充满 */}
+        {/* 速览行在固定卡片内均匀分布。 */}
         <div className="mt-3 flex min-h-0 flex-1 flex-col justify-between">
           {insightRows.map(line => (
             <div key={line.tag} className="flex items-center gap-2 rounded-lg border border-line/70 bg-canvas/50 px-3 py-1">

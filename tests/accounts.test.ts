@@ -113,6 +113,13 @@ test('账号隔离、画像生效与指数配置可通过本地API完成', async
     assert.deepEqual((await configuredAccount()).setup.missing, ['index_auth']);
     assert.deepEqual((await request('/api/sources', first.id)).keywords, []);
     assert.equal((await request('/api/sources', second.id)).keywords[0].name, '阳台种花');
+    const legacyTasks = [{ type: 'videos', keyword: '阳台 种花', days: 7 }, { type: 'topic_search', keyword: '其他采集词' }];
+    await request('/api/collection/config', second.id, 'PUT', { index: { ...rules, tasks: legacyTasks } });
+    const addedSource = (await request('/api/sources', second.id)).keywords[0];
+    await request(`/api/sources/${addedSource.id}`, first.id, 'DELETE', undefined, 404);
+    await request(`/api/sources/${addedSource.id}`, second.id, 'DELETE');
+    assert.deepEqual((await request('/api/sources', second.id)).keywords, []);
+    assert.deepEqual((await request('/api/collection/config', second.id)).config.index.tasks, legacyTasks.slice(1));
     const collection = await request('/api/collection', second.id);
     assert.deepEqual(collection.credentials, {});
     assert.equal(collection.discovery, null);

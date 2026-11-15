@@ -3,7 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { AUTH_ERROR } from './platform-login.ts';
 import { profileOf } from '../collector/core/bloggers.ts';
 
-export interface NoticeIssue { kind: 'paused' | 'disabled' | 'run_failed'; provider?: string; error?: string; count?: number }
+export interface NoticeIssue { kind: 'paused' | 'disabled' | 'run_failed' | 'run_partial'; provider?: string; error?: string; count?: number }
 export interface BloggerNotice { id: number; name: string; latest: string | null; items: { title: string; url: string; addedAt: string }[] }
 
 export function noticeOverview(db: DatabaseSync, accountId: number) {
@@ -21,8 +21,10 @@ export function noticeOverview(db: DatabaseSync, accountId: number) {
         WHERE x.account_id=? AND t.disabled=1 GROUP BY t.error`).all(accountId) as { error: string | null; n: number }[])
       .map((r) => ({ kind: 'disabled' as const, error: r.error ?? '', count: r.n })),
   ];
-  const run = db.prepare("SELECT status FROM task_runs WHERE account_id=? AND task='collect' ORDER BY id DESC LIMIT 1").get(accountId) as { status: string } | undefined;
+  const run = db.prepare(`SELECT status FROM task_runs WHERE account_id=? AND task='collect'
+    AND status IN ('done','done_with_deferred','partial','failed') ORDER BY id DESC LIMIT 1`).get(accountId);
   if (run?.status === 'failed') issues.push({ kind: 'run_failed' as const });
+  if (run?.status === 'partial') issues.push({ kind: 'run_partial' as const });
   // 近30天新增作品即提醒素材；latest 为水位值，前端按博主记已读，更早的更新到博主页回看。
   const bloggers: BloggerNotice[] = (db.prepare("SELECT id,name,note FROM account_sources WHERE account_id=? AND kind='blogger' ORDER BY id").all(accountId) as { id: number; name: string; note: string }[])
     .map((row) => {

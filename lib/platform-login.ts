@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { activeAccount, InputError } from './accounts.ts';
 import { openDb } from './db.ts';
 import { DATA } from './strategies.ts';
+import { lock } from './tasks.ts';
 import { CollectionStore } from '../collector/core/store.ts';
 import { registerAuth } from '../collector/core/settings.ts';
 import { authFromCookies } from '../collector/sources/douyin-index/client.ts';
@@ -15,12 +16,17 @@ import { sessionFromCookies, loadSession, type PlatformAuth } from '../collector
 
 const running = (status: string) => status === 'preparing' || status === 'waiting';
 // 登录失效的统一口径：暂停原因命中这些受控错误码即视为会话失效，登录状态展示与工作台提醒共用。
-export const AUTH_ERROR = /login_required|auth_required|invalid_auth|auth_file/;
+export const AUTH_ERROR = /login_required|auth_required|invalid_auth|invalid_user_agent|auth_file/;
 const messages: Record<string, string> = {
   missing: '尚未连接。', preparing: '正在准备专用登录窗口，首次使用可能需要下载浏览器。',
   waiting: '请在打开的窗口完成登录并按页面提示验证，会话会自动保存在本机。',
-  configured: '登录会话已保存。', expired: '登录已失效，请重新连接。',
-  cancelled: '登录已取消。', timeout: '等待登录超时，请重试。',
+  configured: '会话已保存，待首次实采验证。', verified: '登录已通过采集验证。', expired: '平台无法使用已保存的会话，请重新连接。',
+  cancelled: '登录已取消。', window_closed: '窗口在保存会话前关闭，请重新连接并等候自动保存。',
+  timeout: '等待超时，未检测到平台登录会话。请重新连接并完成页面验证。',
+  browser_setup_failed: '专用浏览器安装失败，请检查网络后重新连接。',
+  login_page_unavailable: '无法打开平台登录页，请检查到平台的网络连接后重试。',
+  session_save_failed: '无法保存登录会话，请检查本机授权目录的写入权限后重试。',
+  collection_busy: '采集正在运行，请等本轮结束后重新连接。',
   failed: '无法完成登录，请检查网络及图形桌面环境后重试。',
 };
 
@@ -80,7 +86,7 @@ async function openLoginWindow(signal: AbortSignal, loginUrl: string): Promise<L
       const cli = join(dirname(require.resolve('playwright/package.json')), 'cli.js');
       await new Promise<void>((resolve, reject) => {
         const child = spawn(process.execPath, [cli, 'install', 'chromium'], { stdio: 'ignore', signal, timeout: 180_000 });
-        child.once('error', reject);
+        child.once('error', () => reject(new Error('browser_setup_failed')));
         child.once('exit', code => code === 0 ? resolve() : reject(new Error('browser_setup_failed')));
       });
       signal.throwIfAborted();
@@ -92,7 +98,8 @@ async function openLoginWindow(signal: AbortSignal, loginUrl: string): Promise<L
     const context = await browser.newContext();
     const page = await context.newPage();
     signal.addEventListener('abort', () => { void browser.close().catch(() => {}); }, { once: true });
-    await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+    await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 })
+      .catch(() => { throw new Error(page.isClosed() ? 'window_closed' : 'login_page_unavailable'); });
     return {
       cookies: () => context.cookies(), userAgent: () => page.evaluate(() => navigator.userAgent),
       isClosed: () => page.isClosed() || !browser.isConnected(), close: () => browser.close(),
@@ -116,8 +123,24 @@ export function saveSession(db: DatabaseSync, provider: string, id: number, cook
   } finally { rmSync(temp, { force: true }); }
 }
 function persistSession(provider: string, id: number, cookies: Cookie[], userAgent?: string) {
-  const db = openDb();
-  try { saveSession(db, provider, id, cookies, userAgent); } finally { db.close(); }
+  let unlock: () => void;
+  try { unlock = lock('collection'); } catch { throw new Error('collection_busy'); }
+  try {
+    const db = openDb();
+    try { saveSession(db, provider, id, cookies, userAgent); } finally { db.close(); }
+  } finally { unlock(); }
+}
+
+export function connectionStatus(db: DatabaseSync, id: number, provider: string) {
+  const row = db.prepare(`SELECT p.error, p.paused, EXISTS(
+    SELECT 1 FROM collection_tasks t WHERE t.provider=c.provider AND t.scope=c.scope AND t.last_success_at IS NOT NULL
+  ) verified FROM collection_credentials c LEFT JOIN collection_provider_state p ON p.provider=c.provider AND p.scope=c.scope
+  WHERE c.account_id=? AND c.provider=?`).get(id, provider);
+  const expired = AUTH_ERROR.test(String(row?.error ?? ''));
+  return {
+    status: !row ? 'missing' : expired ? 'expired' : row.verified ? 'verified' : 'configured',
+    configured: !!row, paused: !!row?.paused, error: typeof row?.error === 'string' ? row.error : null,
+  };
 }
 
 export class PlatformLoginManager {
@@ -133,12 +156,12 @@ export class PlatformLoginManager {
   state(db: DatabaseSync, id: number, provider: string) {
     const platform = LOGIN_PLATFORMS[provider];
     if (!platform) throw new InputError('未知平台', 404);
-    const configured = !!db.prepare('SELECT 1 FROM collection_credentials WHERE account_id=? AND provider=?').get(id, provider);
-    const error = db.prepare('SELECT error FROM collection_provider_state WHERE provider=? AND scope=?').get(provider, `account:${id}`)?.error;
+    const connection = connectionStatus(db, id, provider);
     const job = this.jobs.get(`${provider}:${id}`);
-    const expired = AUTH_ERROR.test(String(error ?? ''));
-    const status = job && job.status !== 'configured' ? job.status : expired ? 'expired' : configured ? 'configured' : 'missing';
-    return { provider, label: platform.label, status, configured, message: messages[status] };
+    const attempt = job && job.status !== 'configured' ? job.status : null;
+    const status = attempt && (running(attempt) || !connection.configured) ? attempt : connection.status;
+    return { provider, label: platform.label, status, configured: connection.configured, message: messages[status],
+      attempt_message: attempt && attempt !== status ? messages[attempt] : null };
   }
   start(db: DatabaseSync, id: number, provider: string) {
     if (!LOGIN_PLATFORMS[provider]) throw new InputError('未知平台', 404);
@@ -166,17 +189,26 @@ export class PlatformLoginManager {
       if (job.abort.signal.aborted) return;
       job.status = 'waiting'; const deadline = this.clock() + 10 * 60_000;
       while (!job.abort.signal.aborted) {
-        if (job.window.isClosed()) { job.status = 'cancelled'; return; }
+        if (job.window.isClosed()) { job.status = 'window_closed'; return; }
         if (this.clock() >= deadline) { job.status = 'timeout'; return; }
         const cookies = await job.window.cookies();
-        let auth: PlatformAuth;
-        try { auth = platform.pick(cookies); } catch { await this.sleep(); continue; }
+        try { platform.pick(cookies); } catch { await this.sleep(); continue; }
         const userAgent = await job.window.userAgent();
         job.abort.signal.throwIfAborted();
-        this.save(job.provider, job.accountId, cookies, userAgent);
+        try { this.save(job.provider, job.accountId, cookies, userAgent); }
+        catch (error) {
+          job.status = (error as Error)?.message === 'collection_busy' ? 'collection_busy' : 'session_save_failed';
+          return;
+        }
         job.status = 'configured'; return;
       }
-    } catch { if (!job.abort.signal.aborted) job.status = job.window?.isClosed() ? 'cancelled' : 'failed'; }
+    } catch (error) {
+      if (!job.abort.signal.aborted) {
+        const code = (error as Error)?.message ?? '';
+        job.status = job.window?.isClosed() ? 'window_closed'
+          : ['browser_setup_failed', 'login_page_unavailable', 'window_closed'].includes(code) ? code : 'failed';
+      }
+    }
     finally { await job.window?.close().catch(() => {}); }
   }
 }

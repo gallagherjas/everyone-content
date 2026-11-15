@@ -20,7 +20,7 @@ function setup() {
   return { db, id: createAccount(db, '提醒账号').id };
 }
 
-test('登录失效进横幅素材，非登录类暂停进异常明细，未连接的平台不提醒', () => {
+test('登录失效和非登录类暂停进入提醒，未连接的平台不提醒', () => {
   const { db, id } = setup();
   try {
     db.prepare('INSERT INTO collection_credentials VALUES(?,?,?,?)').run(id, 'index', 'a.json', `account:${id}`);
@@ -44,9 +44,12 @@ test('禁用任务按错误聚合，最近一轮失败只报一次，成功后�
     db.prepare("INSERT INTO task_runs(account_id,task,status) VALUES(?,'collect','failed')").run(id);
     let n = noticeOverview(db, id);
     assert.deepEqual(n.issues, [{ kind: 'disabled', error: 'schema_error', count: 2 }, { kind: 'run_failed' }]);
+    db.prepare("INSERT INTO task_runs(account_id,task,status) VALUES(?,'collect','partial')").run(id);
+    db.prepare("INSERT INTO task_runs(account_id,task,status) VALUES(?,'collect','empty')").run(id);
+    assert.deepEqual(noticeOverview(db, id).issues.at(-1), { kind: 'run_partial' });
     db.prepare("INSERT INTO task_runs(account_id,task,status) VALUES(?,'collect','done')").run(id);
     n = noticeOverview(db, id);
-    assert.equal(n.issues.some((i) => i.kind === 'run_failed'), false);
+    assert.deepEqual(n.issues, [{ kind: 'disabled', error: 'schema_error', count: 2 }]);
   } finally { db.close(); }
 });
 

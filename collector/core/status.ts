@@ -1,6 +1,14 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { indexSelection,selectionView } from './projection.ts';
 import type { CollectionStore } from './store.ts';
+
+export type CollectionOutcome = 'done' | 'partial' | 'failed' | 'done_with_deferred' | 'deferred' | 'cached' | 'empty';
+export function collectionOutcome({ completed, cached, failed, deferred }: Record<'completed' | 'cached' | 'failed' | 'deferred', number>): CollectionOutcome {
+  if (failed) return completed || cached ? 'partial' : 'failed';
+  if (deferred) return completed || cached ? 'done_with_deferred' : 'deferred';
+  if (completed) return 'done';
+  return cached ? 'cached' : 'empty';
+}
 export function collectionRuns(db: DatabaseSync,accountId: number): any[] {
   return db.prepare(`SELECT r.id,r.provider,r.operation,r.target,r.status,r.observed_at,r.version,r.error FROM collection_runs r
     JOIN collection_run_accounts x ON x.run_id=r.id WHERE x.account_id=? ORDER BY r.id DESC LIMIT 50`).all(accountId) as any[];
@@ -15,6 +23,10 @@ export function collectionStatus(db: DatabaseSync,a: any,store: CollectionStore 
   let discovery=null;
   const credentials=Object.fromEntries((db.prepare('SELECT provider FROM collection_credentials WHERE account_id=?').all(a.id) as any[]).map(r=>[r.provider,true]));
   if(credentials.index&&store)discovery=selectionView(indexSelection(store,a));
-  const queue=db.prepare('SELECT COUNT(*) total,SUM(t.next_run_at<=? AND t.disabled=0) due FROM collection_tasks t JOIN collection_task_accounts x ON x.task_key=t.key WHERE x.account_id=?').get(Date.now(),a.id) as any;
+  const now=Date.now();
+  const queue=db.prepare(`SELECT COUNT(*) total,COUNT(CASE WHEN t.next_run_at<=? AND t.lease_until<=?
+    AND t.disabled=0 AND COALESCE(p.paused,0)=0 THEN 1 END) due
+    FROM collection_tasks t JOIN collection_task_accounts x ON x.task_key=t.key
+    LEFT JOIN collection_provider_state p ON p.provider=t.provider AND p.scope=t.scope WHERE x.account_id=?`).get(now,now,a.id) as any;
   return {tasks,runs,budgets,discovery,queue,credentials};
 }

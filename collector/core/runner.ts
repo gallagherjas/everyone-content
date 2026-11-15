@@ -10,7 +10,7 @@ export function controlledError(error: any): string {
   if(['ECONNREFUSED','ENOTFOUND','EHOSTUNREACH'].includes(error?.cause?.code??error?.code))return 'service_unavailable';
   if(error?.message==='login_or_challenge_html')return 'login_required';
   const code=String(error?.message??'');
-  return /^(daily_budget_exhausted|tick_budget_exhausted|source_paused|source_dates_missing|login_required|rate_limited|payment_required|schema_error|decode_error|unsupported_encryption|identity_conflict|auth_required|invalid_auth_cookie|invalid_user_agent|auth_file_must_be_private_0600|transport_error|service_unavailable|business_error|http_error_\d+)$/.test(code)?code:error?.code==='SCHEMA_ERROR'?'schema_error':error?.code==='ENOENT'?'auth_required':'request_failed';
+  return /^(daily_budget_exhausted|tick_budget_exhausted|source_paused|source_dates_missing|login_required|rate_limited|payment_required|schema_error|decode_error|unsupported_encryption|identity_conflict|auth_required|invalid_auth_cookie|invalid_user_agent|auth_file_must_be_private_0600|transport_error|service_unavailable|business_error|unexpected_html|invalid_response|http_error_\d+)$/.test(code)?code:error?.code==='SCHEMA_ERROR'?'schema_error':error?.code==='ENOENT'?'auth_required':'request_failed';
 }
 function transport(store: CollectionStore,run: any,counts: Record<string,number>,fetchImpl: typeof fetch,sleep: (ms: number)=>Promise<void>,clock: ()=>number,requestLimit: number=Infinity) {
   return async(input: any,init?: any): Promise<Response> => {
@@ -68,7 +68,8 @@ export async function runCollection(store: CollectionStore,options: RunOptions={
     const urgency=(t: any)=>t.priority+Math.log1p(Math.max(0,clock()-t.next_run_at)/HOUR);
     return Math.floor(b.priority/10)-Math.floor(a.priority/10)||fairness(a)-fairness(b)||urgency(b)-urgency(a)||a.next_run_at-b.next_run_at;
   };
-  const exhausted=new Set<string>(),summary={completed:0,cached:0,failed:0,deferred:0,requests:counts,accounts:Object.fromEntries(ids.map(id=>[id,{completed:0,cached:0,failed:0}] as [number,any]))};
+  const exhausted=new Set<string>(),summary={completed:0,cached:0,failed:0,deferred:0,requests:counts,
+    accounts:Object.fromEntries(ids.map(id=>[id,{completed:0,cached:0,failed:0,deferred:0}]))};
   let indexChanged=false;
   while(true) {
     if(!tasks.length){
@@ -81,17 +82,24 @@ export async function runCollection(store: CollectionStore,options: RunOptions={
     tasks.sort(compare);const task=tasks.shift()!;
     visited.add(task.key);done++;total=Math.max(total,done+tasks.length);
     options.progress?.(Math.min(99,Math.round(done*100/total)));
-    if(Object.values(counts).reduce((a,b)=>a+b,0)>=(options.requestLimit??Infinity))break;
-    if((options.only&&(options.only!=='index'?taskScope(task)!==options.only:task.provider!=='index'))||exhausted.has(task.provider))continue;
+    if(options.only&&(options.only!=='index'?taskScope(task)!==options.only:task.provider!=='index'))continue;
     if(task.provider==='index'&&!['topic_dates','author_dates'].includes(task.operation)){
       const datesType=task.operation.startsWith('author_')?'author_dates':'topic_dates';
       if(!store.latest(taskKey('index',task.scope,{type:datesType})))continue;
     }
-    if((counts[task.provider]??0)>=(store.db.prepare('SELECT per_tick FROM collection_limits WHERE provider=?').get(task.provider) as any).per_tick)continue;
     if((store.db.prepare('SELECT paused FROM collection_provider_state WHERE provider=? AND scope=?').get(task.provider,task.scope) as any)?.paused)continue;
     const assigned=new Set(store.accounts(task.key).map((a: any)=>a.id));
     const participants=accounts.filter(a=>assigned.has(a.id)&&(!options.scheduled||a.config.schedules[task.provider]?.enabled)).map(a=>a.id);
-    if(!participants.length||!store.claim(task,clock()))continue;
+    if(!participants.length)continue;
+    const defer=(recorded: boolean)=>{
+      if(recorded)summary.deferred++;
+      for(const id of participants)summary.accounts[id].deferred++;
+    };
+    if(exhausted.has(task.provider) || Object.values(counts).reduce((a,b)=>a+b,0)>=(options.requestLimit??Infinity) ||
+      (counts[task.provider]??0)>=(store.db.prepare('SELECT per_tick FROM collection_limits WHERE provider=?').get(task.provider) as any).per_tick){
+      defer(false);continue;
+    }
+    if(!store.claim(task,clock()))continue;
     const run=store.begin(task,clock(),null,participants);
     try {
       const result=await execute(store,run,transport(store,run,counts,options.fetchImpl??fetch,sleep,clock,options.requestLimit),clock);
@@ -122,14 +130,14 @@ export async function runCollection(store: CollectionStore,options: RunOptions={
       const pending=/^interval_pending (\d+)$/.exec((error as Error)?.message??'');
       if(pending){
         store.db.prepare("UPDATE collection_runs SET status='deferred',error='interval_pending' WHERE id=?").run(run.id);
-        store.release(task,Number(pending[1]),'interval_pending');summary.deferred++;
+        store.release(task,Number(pending[1]),'interval_pending');defer(true);
         options.log?.(`${task.provider}/${task.operation} ${task.target}：interval_pending`,participants);
         continue;
       }
       const code=controlledError(error);
       if(/^(daily|tick)_budget_exhausted$/.test(code)){
         store.db.prepare("UPDATE collection_runs SET status='deferred',error=? WHERE id=?").run(code,run.id);
-        store.release(task,code.startsWith('daily')?Math.floor(clock()/DAY)*DAY+DAY:clock()+300000,code);exhausted.add(task.provider);summary.deferred++;
+        store.release(task,code.startsWith('daily')?Math.floor(clock()/DAY)*DAY+DAY:clock()+300000,code);exhausted.add(task.provider);defer(true);
       }else{store.fail(run,code,clock());summary.failed++;for(const id of participants)summary.accounts[id].failed++;if(code==='service_unavailable')exhausted.add(task.provider);}
       options.log?.(`${task.provider}/${task.operation} ${task.target}：${code}`,participants);
     }

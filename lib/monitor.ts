@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { formatTime } from './time.ts';
 import { SNAPSHOT_PLATFORMS } from '../collector/sources/platform/snapshot.ts';
+import { connectionStatus } from './platform-login.ts';
 
 export interface SnapshotPoint { at: string; atMs: number; fans: number | null; likes: number | null; works: number | null; views: number | null }
 
@@ -13,8 +14,7 @@ export function monitorOverview(db: DatabaseSync, accountId: number) {
   const now = Date.now(), today = formatTime(now).slice(0, 10);
   const platforms: Record<string, any> = {};
   for (const provider of PROVIDERS) {
-    const configured = !!db.prepare('SELECT 1 FROM collection_credentials WHERE account_id=? AND provider=?').get(accountId, provider);
-    const state = db.prepare('SELECT paused,error FROM collection_provider_state WHERE provider=? AND scope=?').get(provider, `account:${accountId}`) as any;
+    const connection = connectionStatus(db, accountId, provider);
     const rows = db.prepare(`SELECT r.observed_at,r.at_ms,o.metrics FROM collection_observations o
       JOIN collection_runs r ON r.id=o.run_id JOIN collection_run_accounts x ON x.run_id=r.id
       WHERE x.account_id=? AND r.provider=? AND o.kind='account' AND r.status='ok'
@@ -32,8 +32,7 @@ export function monitorOverview(db: DatabaseSync, accountId: number) {
       return cur == null || prev == null ? null : cur - prev;
     };
     platforms[provider] = {
-      configured,
-      paused: !!state?.paused, error: state?.error ?? null,
+      ...connection,
       latest: latest ? { at: latest.at, fans: latest.fans, likes: latest.likes, works: latest.works, views: latest.views } : null,
       deltaToday: diffFans(series.filter(p => p.at < today).at(-1)),
       delta7d: diffFans(weekBase),

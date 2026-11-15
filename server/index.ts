@@ -33,6 +33,7 @@ import { monitorOverview } from '../lib/monitor.ts';
 import { noticeOverview } from '../lib/notices.ts';
 import { CollectionStore, PROVIDERS, SCOPES, atomic } from '../collector/core/store.ts';
 import { collectionStatus } from '../collector/core/status.ts';
+import { normalize } from '../collector/core/discovery.ts';
 import { planCollection } from '../collector/core/planner.ts';
 import { bloggerOverview, bloggerDetail } from '../collector/core/bloggers.ts';
 import { runScheduledCollection } from '../lib/collection-scheduler.ts';
@@ -376,8 +377,18 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
   if (source && ['PUT', 'DELETE'].includes(method || '')) {
     const s = sources(db, id).find((s) => s.id === Number(source[1]));
     if (!s) throw new InputError('采集源不存在', 404);
-    if (method === 'DELETE')
-      db.prepare('DELETE FROM account_sources WHERE id=? AND account_id=?').run(s.id, id);
+    if (method === 'DELETE') {
+      atomic(db, () => {
+        db.prepare('DELETE FROM account_sources WHERE id=? AND account_id=?').run(s.id, id);
+        if (s.kind !== 'keyword') return;
+        const key = normalize(s.source_key);
+        const { index } = a.config;
+        const tasks = index.tasks.filter(task =>
+          !['videos', 'topic_search'].includes(task.type) || normalize(task.keyword) !== key);
+        if (tasks.length !== index.tasks.length)
+          db.prepare('UPDATE accounts SET config=? WHERE id=?').run(JSON.stringify({ ...a.config, index: { ...index, tasks } }), id);
+      });
+    }
     else {
       const b = await body(req),
         status = b.status ?? s.status;

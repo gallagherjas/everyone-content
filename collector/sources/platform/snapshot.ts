@@ -70,42 +70,60 @@ function pick(body: any, paths: string[]): number | null {
 export async function fetchSnapshot(provider: string, auth: PlatformAuth, client: typeof fetch): Promise<Snapshot> {
   const p = SNAPSHOT_PLATFORMS[provider];
   if (!p) throw new Error('schema_error');
+  let mismatch = 'schema_error';
   for (const path of p.endpoints) {
-    let text: string;
+    let res: Response;
     try {
-      const res = await client(p.origin + path, {
+      res = await client(p.origin + path, {
         headers: { cookie: auth.cookie, referer: p.referer, ...(auth.userAgent ? { 'user-agent': auth.userAgent } : {}) },
-        signal: AbortSignal.timeout(20000), redirect: 'error',
+        signal: AbortSignal.timeout(20000), redirect: 'manual',
       });
-      if ([401, 403].includes(res.status)) throw new Error('login_required');
-      if (res.status === 429) throw new Error('rate_limited');
-      if (!res.ok) continue;
-      text = await res.text();
     } catch (error) {
-      if (/^(login_required|rate_limited|daily_budget_exhausted|tick_budget_exhausted|source_paused)$|^interval_pending/.test((error as Error)?.message ?? '')) throw error;
+      if (/^(daily_budget_exhausted|tick_budget_exhausted|source_paused)$|^interval_pending /.test((error as Error)?.message ?? '')) throw error;
+      throw new Error('transport_error', { cause: error });
+    }
+    if (res.status === 401) throw new Error('login_required');
+    if (res.status === 429) throw new Error('rate_limited');
+    if ([404, 405].includes(res.status)) {
+      mismatch = `http_error_${res.status}`;
       continue;
     }
-    if (/^\s*</.test(text)) throw new Error('login_required');
+    if (!res.ok) throw new Error(`http_error_${res.status}`);
+    const text = await res.text().catch(error => { throw new Error('transport_error', { cause: error }); });
+    if (/^\s*</.test(text)) throw new Error('unexpected_html');
     let body: any;
-    try { body = JSON.parse(text); } catch { continue; }
+    try { body = JSON.parse(text); } catch { throw new Error('invalid_response'); }
+    const code = Number(body?.status_code ?? body?.code ?? 0);
+    const message = body?.status_msg ?? body?.message ?? body?.msg;
+    if (code === 401 || (provider === 'douyin' && code === 8) ||
+        (typeof message === 'string' && /^(用户未登录|请先登录)[。！! ]*$/.test(message.trim()))) {
+      throw new Error('login_required');
+    }
+    if (code === 429) throw new Error('rate_limited');
+    if (![0, 200].includes(code) || body?.success === false) throw new Error('business_error');
     const metrics = {
       fans: pick(body, p.fans), likes: pick(body, p.likes), works: pick(body, p.works), views: pick(body, p.views),
     };
-    if (Object.values(metrics).every(v => v === null)) continue;
+    if (Object.values(metrics).every(v => v === null)) {
+      mismatch = 'schema_error';
+      continue;
+    }
     return { uid: String(pick(body, p.uid) ?? 'self'), metrics };
   }
-  throw new Error('schema_error');
+  throw new Error(mismatch);
 }
 
 // runner 的 execute 分发入口:凭证读取 → 当日去重 → 单请求快照。
 export async function snapshotExecute(store: CollectionStore, run: any, client: typeof fetch, clock: () => number): Promise<any> {
   const credential = store.db.prepare(
-    'SELECT c.auth_path FROM collection_credentials c JOIN collection_task_accounts a ON a.account_id=c.account_id WHERE a.task_key=? AND c.provider=? LIMIT 1',
+    `SELECT c.auth_path,t.last_success_at FROM collection_credentials c
+    JOIN collection_task_accounts a ON a.account_id=c.account_id JOIN collection_tasks t ON t.key=a.task_key
+    WHERE a.task_key=? AND c.provider=? LIMIT 1`,
   ).get(run.task_key, run.provider) as any;
   const auth = loadSession(credential?.auth_path);
   const version = stamp(clock()).slice(0, 10);
   const previous = store.latest(run.task_key);
-  if (previous?.version === version) return { cached: previous, version };
+  if (credential?.last_success_at != null && previous?.version === version) return { cached: previous, version };
   const snapshot = await fetchSnapshot(run.provider, auth, client);
   return { data: snapshot, version, fingerprint: hash(JSON.stringify(snapshot.metrics)) };
 }
