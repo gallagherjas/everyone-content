@@ -4,7 +4,7 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import type { DatabaseSync } from 'node:sqlite';
 import { COLLECTION_PROVIDERS, SCHEDULE_SCOPES, type CollectionSchedules } from '../../lib/collection-schedule.ts';
-import { COLLECTION_DAY_MS, collectionDay } from '../../lib/time.ts';
+import { COLLECTION_DAY_MS, collectionDay, nextCollectionDay } from '../../lib/time.ts';
 
 export const PROVIDERS: readonly string[] = COLLECTION_PROVIDERS;
 interface ScopedTask { provider: string; operation: string }
@@ -35,6 +35,18 @@ export function atomic<T>(db: DatabaseSync, fn: () => T): T {
   try { const result=fn(); db.exec('RELEASE collection_write'); return result; }
   catch(error) { db.exec('ROLLBACK TO collection_write; RELEASE collection_write'); throw error; }
 }
+export function freshSnapshots(db: DatabaseSync, accountId: number, now: number, provider: string | null = null) {
+  return db.prepare(`SELECT t.*,r.id previous_id,r.version FROM collection_tasks t
+    JOIN collection_task_accounts x ON x.task_key=t.key
+    JOIN collection_runs r ON r.id=t.last_success_id AND r.task_key=t.key
+    JOIN collection_run_accounts a ON a.run_id=r.id AND a.account_id=x.account_id
+    LEFT JOIN collection_provider_state p ON p.provider=t.provider AND p.scope=t.scope
+    WHERE x.account_id=? AND (? IS NULL OR t.provider=?) AND t.operation='account_snapshot'
+      AND t.lease_until<=? AND t.disabled=0 AND t.error IS NULL AND COALESCE(p.paused,0)=0
+      AND t.last_success_at IS NOT NULL AND r.status='ok' AND r.version=?`)
+    .all(accountId,provider,provider,now,collectionDay(now)) as
+      (Record<string, any> & { key: string; previous_id: number; version: string })[];
+}
 export class CollectionStore {
   db: DatabaseSync; directory: string; owner: string;
   constructor(db: DatabaseSync, directory: string) { this.db=db; this.directory=resolve(directory,'collection'); this.owner=randomUUID(); }
@@ -63,18 +75,6 @@ export class CollectionStore {
     return this.db.prepare('SELECT * FROM collection_tasks WHERE key=?').get(key) as any;
   }
   latest(key: string): any { return this.db.prepare("SELECT * FROM collection_runs WHERE task_key=? AND status='ok' ORDER BY id DESC LIMIT 1").get(key) as any; }
-  freshSnapshot(accountId: number, provider: string, now: number) {
-    return this.db.prepare(`SELECT t.*,r.id previous_id,r.version FROM collection_tasks t
-      JOIN collection_task_accounts x ON x.task_key=t.key
-      JOIN collection_runs r ON r.id=t.last_success_id AND r.task_key=t.key
-      JOIN collection_run_accounts a ON a.run_id=r.id AND a.account_id=x.account_id
-      LEFT JOIN collection_provider_state p ON p.provider=t.provider AND p.scope=t.scope
-      WHERE x.account_id=? AND t.provider=? AND t.operation='account_snapshot' AND t.next_run_at>?
-        AND t.lease_until<=? AND t.disabled=0 AND t.error IS NULL AND COALESCE(p.paused,0)=0
-        AND t.last_success_at IS NOT NULL AND r.status='ok' AND r.version=?`)
-      .get(accountId,provider,now,now,collectionDay(now)) as
-        (Record<string, any> & { key: string; previous_id: number; version: string }) | undefined;
-  }
   accounts(key: string): any[] { return this.db.prepare('SELECT a.*,ta.config_sha FROM collection_task_accounts ta JOIN accounts a ON a.id=ta.account_id WHERE task_key=? AND a.status=\'active\'').all(key) as any[]; }
   dueTasks(accountIds: number[],now=Date.now()): any[] {
     if(!accountIds.length)return [];
@@ -116,7 +116,7 @@ export class CollectionStore {
       if(!sourceKey&&at-now>600000)throw new Error(`interval_pending ${at}`);
       const day=collectionDay(at);
       const used=(this.db.prepare('SELECT COUNT(*) n FROM collection_requests WHERE provider=? AND day=?').get(run.provider,day) as any).n;
-      if(used>=limit.daily_limit)throw new Error('daily_budget_exhausted');
+      if(used>=limit.daily_limit)throw Object.assign(new Error('daily_budget_exhausted'),{retryAt:nextCollectionDay(at)});
       const id=Number(this.db.prepare('INSERT INTO collection_requests(run_id,provider,scope,day,at_ms,endpoint,source_key,parameters) VALUES(?,?,?,?,?,?,?,?)')
         .run(run.id,run.provider,run.scope,day,at,endpoint,sourceKey,JSON.stringify(parameters)).lastInsertRowid);
       this.db.prepare(`INSERT INTO collection_provider_state(provider,scope,last_request_at) VALUES(?,?,?)

@@ -86,7 +86,7 @@ export default function CollectPage({ current, onUpdate, jumpTo }: { current: Ac
     <div className="space-y-5">
       <KeepAlive active={section === "overview"}><section className="panel">
         <h2 className="font-semibold text-xl">采集总览</h2>
-        <p className="mt-1.5 text-sm text-muted">额度跨账号共用，每日 08:00 重置。</p>
+        <p className="mt-1.5 text-sm text-muted">额度跨账号共用，每日北京时间 00:00 重置。</p>
         <div className="mt-4 flex flex-wrap gap-2">
           {[...(state?.budgets ?? [])].sort((a, b) => (a.provider === 'index' ? 0 : 1) - (b.provider === 'index' ? 0 : 1))
             .map(b => <BudgetCard key={b.provider} label={names[b.provider] ?? b.provider} used={b.used} limit={b.daily_limit} connected={!!state?.credentials?.[b.provider]} />)}

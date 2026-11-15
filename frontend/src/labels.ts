@@ -22,7 +22,7 @@ const errors: Record<string, string> = {
   source_dates_missing: "正在等待平台提供数据日期。下轮采集会重新检查。",
   service_unavailable: "暂时无法连接平台。请检查网络与平台能否访问。",
   transport_error: "请求未完成。请检查网络或代理后重试。",
-  daily_budget_exhausted: "今日采集次数已达上限。请等北京时间 08:00 后再采。",
+  daily_budget_exhausted: "今日采集次数已达上限。请等北京时间 00:00 重置后再采。",
   tick_budget_exhausted: "本轮采集次数已达上限。剩余任务可在后续采集执行。",
   interval_pending: "平台请求间隔未到。到时可手动采集，或等下一次定时采集。",
   source_paused: "该来源已暂停。请查看本来源上一条失败记录。",

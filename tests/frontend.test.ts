@@ -41,6 +41,10 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
   const config = { schedules: defaultSchedules(), index: { discovery: null, tasks: [] } };
   const accounts = [];
   const requests = [], runs = [], bloggers = [], sources = [];
+  const bloggerWorks = [
+    { id: '102', title: '最新作品', url: 'https://www.douyin.com/video/102', publishedAt: '2026-11-15T00:00:00+08:00', likes: 10 },
+    { id: '101', title: '高赞作品', url: 'https://www.douyin.com/video/101', publishedAt: '2026-11-14T00:00:00+08:00', likes: 50 },
+  ];
   let manualOutcome = null;
   const notices = { auth: [], issues: [], bloggers: [] };
   const emptyPlatform = () => ({ configured: false, paused: false, error: null, latest: null, deltaToday: null, delta7d: null, deltaLikes7: null, deltaViews7: null, series: [] });
@@ -64,6 +68,8 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
         { key: 'video', provider: 'index', operation: 'videos', target: '待采集词#7', status: 'due', error: null, last_success_at: Date.UTC(2026, 10, 14, 20, 0) },
         { key: 'topic', provider: 'index', operation: 'topic_search', target: '定时采集词', status: 'waiting', next_run_at: Date.UTC(2026, 10, 15, 4, 0), error: null },
         { key: 'snapshot', provider: 'xhs', operation: 'account_snapshot', target: 'account_snapshot', status: 'paused', source_error: 'login_required' },
+        { key: 'collected', provider: 'douyin', operation: 'account_snapshot', target: 'account_snapshot', status: 'collected',
+          last_success_at: Date.UTC(2026, 10, 15, 5), error: null },
       ] : [];
       data = { tasks, runs, budgets: [{ provider: 'index', daily_limit: 30, used: 0 }], credentials: { index: true },
         queue: { total: tasks.length, due: tasks.filter(task => task.status === 'due').length },
@@ -72,7 +78,7 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     }
     else if (url.pathname === '/api/collection/progress') data = { run_id: 1, running: manualOutcome === 'running', progress: 30, status: manualOutcome };
     else if (url.pathname === '/api/bloggers') data = bloggers;
-    else if (/^\/api\/bloggers\/\d+$/.test(url.pathname)) data = { id: 1, kind: 'blogger', userId: 'u1', name: '甲', status: 'ready', profile: {}, works: [], trend: null };
+    else if (/^\/api\/bloggers\/\d+$/.test(url.pathname)) data = { id: 1, kind: 'blogger', userId: 'u1', name: '甲', status: 'ready', profile: {}, works: bloggerWorks, trend: null };
     else if (url.pathname === '/api/notices') data = structuredClone(notices);
     else if (url.pathname === '/api/run/collect' && method === 'POST') data = { started: true, run_id: 1 };
     else if (url.pathname === '/api/monitor') data = monitorData;
@@ -190,11 +196,21 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     assert.ok(!navTab('采集').querySelector('.bg-danger'));
     assert.equal(panel(), undefined);
     assert.ok(!shows('抖音指数登录已失效'));
-    await act(async () => { reminder().click(); });
+    const pointer = (target, type, relatedTarget = null, pointerType = 'mouse') => act(async () => {
+      target.dispatchEvent(new window.PointerEvent(type, { bubbles: true, relatedTarget, pointerType }));
+    });
+    await pointer(reminder(), 'pointerover', null, 'touch');
+    assert.equal(panel(), undefined);
+    await pointer(reminder(), 'pointerover');
     assert.match(panel().textContent, /抖音指数登录已失效.*最近一轮部分采集失败/);
+    await pointer(reminder(), 'pointerout', panel());
+    assert.equal(reminder().getAttribute('aria-expanded'), 'true');
+    await pointer(panel(), 'pointerout', window.document.body);
+    assert.equal(panel(), undefined);
+    await pointer(reminder(), 'pointerover');
     await act(async () => { window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape' })); });
     assert.equal(panel(), undefined);
-    await act(async () => { reminder().click(); });
+    await pointer(reminder(), 'pointerover');
     await click('去连接');
     assert.match(window.document.body.textContent, /连接平台/);
     assert.equal(panel(), undefined);
@@ -219,6 +235,17 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     await navigate('博主1'); // 进入博主页默认选中甲，即视为已读
     assert.equal(window.localStorage.getItem('everyone-content-blogger-seen-1'), JSON.stringify({ 1: '2026-11-14 08:00:00' }));
     assert.equal(navTab('博主').textContent, '博主');
+    const workSort = field('博主作品排序');
+    const workTitles = () => visible('a[href*="douyin.com/video/"]').map(el => el.textContent);
+    assert.equal(workSort.selectedOptions[0].textContent, '按时间');
+    assert.deepEqual(workTitles(), ['最新作品', '高赞作品']);
+    for (const [value, titles] of [['likes', ['高赞作品', '最新作品']], ['time', ['最新作品', '高赞作品']]]) {
+      await act(async () => {
+        workSort.value = value;
+        workSort.dispatchEvent(new window.Event('change', { bubbles: true }));
+      });
+      assert.deepEqual(workTitles(), titles);
+    }
     await navigate('采集'); await click('总览');
     assert.ok(!visible('p').some(el => el.textContent.includes('待执行')));
     await click('队列');
@@ -226,13 +253,11 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     assert.ok(shows('· 待采集词 · 近7天'));
     assert.ok(shows('上次成功 2026-11-15 04:00:00'));
     assert.ok(shows('未到时间'));
+    assert.ok(shows('本日已采'));
     assert.ok(visible('p').some(el => el.textContent.includes('平台提示未登录')));
-    await click('待执行 1');
-    assert.ok(shows('· 待采集词 · 近7天'));
-    assert.ok(!shows('· 定时采集词'));
-    assert.ok(!shows('已暂停'));
-    assert.equal(field('队列筛选').querySelectorAll('button').length, 2);
-    await click('全部任务 3');
+    assert.equal(field('队列筛选'), undefined);
+    assert.ok(shows('共 4 项 · 待执行 1 项'));
+    assert.ok(shows('待执行'));
     assert.ok(shows('· 定时采集词'));
     await click('总览');
     assert.equal(field('选择采集范围'), undefined);
@@ -264,7 +289,7 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     await clickField('话题榜运行时间');
     await edit(field('新增话题榜运行时间'), '09:35');
     await click('＋ 添加');
-    await clickField('移除话题榜运行时间10:00');
+    await clickField('移除话题榜运行时间00:00');
     await clickField('话题榜运行时间');
     await click('保存定时设置');
     const saved = accounts[0].config.schedules;

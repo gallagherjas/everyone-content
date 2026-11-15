@@ -21,11 +21,14 @@ function setup() {
   const authorize = (id: number) => db.prepare('INSERT INTO collection_credentials VALUES(?,?,?,?)').run(id, 'index', 'test-only-auth-path', `account:${id}`);
   return { db, calls, start, save, authorize };
 }
-test('指数定时默认关闭，按北京时间校验时间与请求上限', () => {
+test('采集定时默认关闭，预填北京时间午夜并校验时间与请求上限', () => {
   const schedules = defaultSchedules();
   assert.deepEqual(Object.keys(schedules), ['topic_rank', 'video_rank', 'author', 'index', 'douyin', 'xhs', 'bili']);
   assert.ok(Object.values(schedules).every(schedule => !schedule.enabled));
+  assert.ok(Object.values(schedules).every(schedule => schedule.times.length === 1 && schedule.times[0] === '00:00'));
   assert.equal(latestScheduleSlot(schedules.index, now), null);
+  const midnight = Date.UTC(2026, 10, 8, 16);
+  assert.equal(latestScheduleSlot({ ...schedules.index, enabled: true }, midnight), '2026-11-08 16:00:00');
   schedules.index = { enabled: true, times: ['10:30', '09:30', '09:30'], request_limit: 2 };
   assert.deepEqual(validateSchedules(schedules).index.times, ['09:30', '10:30']);
   assert.equal(latestScheduleSlot(schedules.index, now - 1), null);

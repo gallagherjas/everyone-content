@@ -3,6 +3,8 @@ import { atomic,hash,taskKey, type CollectionStore } from './store.ts';
 import { rebuildAccount } from './projection.ts';
 import { normalize,count } from './discovery.ts';
 import { projectBloggers } from './bloggers.ts';
+import { indexEffectiveVersion } from '../sources/douyin-index/protocol.ts';
+import { collectionDay } from '../../lib/time.ts';
 
 export interface PlanOptions { accountIds?: number[]; scheduled?: boolean; only?: string; now?: number }
 export function collectionAccounts(db: DatabaseSync,{accountIds,scheduled=false,only}:PlanOptions={}): any[] {
@@ -39,6 +41,7 @@ function resolveSearches(db: DatabaseSync, a: any, scope: string, store: Collect
 }
 export function planCollection(store: CollectionStore,options: PlanOptions={}): any[] {
   const db=store.db,now=options.now??Date.now(),accounts=collectionAccounts(db,options);
+  const day=collectionDay(now);
   const advanceVersion = (task: {key: string; error: string | null},version?: string) => {
     const previous = version && !task.error ? store.latest(task.key) : null;
     if(previous && previous.version!==version)
@@ -54,15 +57,13 @@ export function planCollection(store: CollectionStore,options: PlanOptions={}): 
         const dates=datesRun?store.data(datesRun):null;
         for(const spec of discovery.tasks()) {
           const task=store.queue('index',cred.scope,spec,[a],{priority:spec.type==='topic_search'?30:spec.type==='videos'?20:10});
-          advanceVersion(task,spec.type==='topic_relation'?dates?.valid_week:dates?.valid_day);
+          advanceVersion(task,indexEffectiveVersion(spec.type,day,dates));
         }
-        // 博主链路：先解析待搜索昵称，再按开关排任务；有博主才排达友域日期任务，避免空转额度。
+        // 先解析已找到的昵称，再为追踪中的博主安排采集。
         resolveSearches(db,a,cred.scope,store);
         const bloggers=db.prepare("SELECT * FROM account_sources WHERE account_id=? AND kind='blogger'").all(a.id) as any[];
         const pending=db.prepare("SELECT * FROM account_sources WHERE account_id=? AND kind='blogger_search' AND status='ready'").all(a.id) as any[];
         if(bloggers.length||pending.length){
-          const authorDatesRun=store.latest(store.queue('index',cred.scope,{type:'author_dates'},[a],{priority:100}).key);
-          const authorDates=authorDatesRun?store.data(authorDatesRun):null;
           for(const s of pending)
             store.queue('index',cred.scope,{type:'author_search',keyword:s.source_key},[a],{priority:40});
           for(const s of bloggers.filter(s=>s.status==='ready')){
@@ -70,7 +71,7 @@ export function planCollection(store: CollectionStore,options: PlanOptions={}): 
             for(const [type,on] of [['author_works',true],['author_core',opt.core],['author_info',opt.info]] as const){
               if(!on)continue;
               const task=store.queue('index',cred.scope,{type,id:s.source_key},[a],{priority:15});
-              advanceVersion(task,authorDates?.datetime);
+              advanceVersion(task,indexEffectiveVersion(type,day));
             }
           }
           projectBloggers(store,a,cred.scope);

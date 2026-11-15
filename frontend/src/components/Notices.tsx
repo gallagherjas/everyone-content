@@ -93,6 +93,7 @@ export function NoticeMenu({ onAction }: { onAction: (section: "auth" | "logs") 
   const [open, setOpen] = useState(false);
   const id = useId();
   const container = useRef<HTMLDivElement>(null), trigger = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLElement>(null);
   const hasIssues = auth.length > 0 || issues.length > 0;
   useEffect(() => {
     if (!open) return;
@@ -102,7 +103,7 @@ export function NoticeMenu({ onAction }: { onAction: (section: "auth" | "logs") 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setOpen(false);
-      trigger.current?.focus();
+      if (container.current?.contains(document.activeElement)) trigger.current?.focus();
     };
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
@@ -116,7 +117,12 @@ export function NoticeMenu({ onAction }: { onAction: (section: "auth" | "logs") 
     trigger.current?.focus();
     onAction(section);
   };
-  return <div ref={container} className="relative col-start-2 row-start-1 ml-auto shrink-0 self-center">
+  return <div ref={container} className="relative col-start-2 row-start-1 ml-auto shrink-0 self-center"
+    onPointerEnter={event => { if (event.pointerType === "mouse") setOpen(true); }}
+    onPointerLeave={event => {
+      if (event.pointerType === "mouse" && !panel.current?.contains(document.activeElement)) setOpen(false);
+    }}
+    onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}>
     <button ref={trigger} type="button" aria-label="提醒" aria-description={hasIssues ? "有待处理的异常" : undefined}
       aria-controls={id} aria-expanded={open} onClick={() => setOpen(value => !value)}
       className="relative grid size-10 place-items-center rounded-lg text-ink transition-colors hover:text-brand focus-visible:outline-2 focus-visible:outline-brand aria-expanded:text-brand">
@@ -125,29 +131,31 @@ export function NoticeMenu({ onAction }: { onAction: (section: "auth" | "logs") 
       </svg>
       {hasIssues && <span aria-hidden="true" className="absolute right-2 top-1.5 size-2 rounded-full bg-danger" />}
     </button>
-    <section id={id} hidden={!open} aria-label="异常提醒"
-      className="absolute right-0 top-full z-10 mt-2 max-h-[min(26rem,65vh)] w-[min(22rem,calc(100vw-2rem))] space-y-3 overflow-auto rounded-2xl border border-line bg-card p-4 shadow-lg">
-      <h2 className="text-sm font-semibold">提醒</h2>
-      {hasIssues ? <ul className="divide-y divide-line">
-        {auth.map(({ provider }) => <li key={provider} className="flex items-center justify-between gap-3 py-2.5">
-          <div className="min-w-0 text-sm">
-            <p>{names[provider] ?? provider}登录已失效</p>
-            <p className="mt-0.5 text-xs text-muted">相关采集已暂停。</p>
-          </div>
-          <button className="btn-sm shrink-0" type="button" onClick={() => goTo("auth")}>去连接</button>
-        </li>)}
-        {issues.map(issue => {
-          const { title, detail } = describeIssue(issue);
-          return <li key={issue.kind === "paused" ? issue.provider + "-paused" : issue.kind === "disabled" ? issue.error + "-disabled" : issue.kind}
-            className="flex items-center justify-between gap-3 py-2.5">
+    <div hidden={!open} className="absolute right-0 top-full z-10 w-[min(22rem,calc(100vw-2rem))] pt-2">
+      <section ref={panel} id={id} aria-label="异常提醒"
+        className="max-h-[min(26rem,65vh)] space-y-3 overflow-auto rounded-2xl border border-line bg-card p-4 shadow-lg">
+        <h2 className="text-sm font-semibold">提醒</h2>
+        {hasIssues ? <ul className="divide-y divide-line">
+          {auth.map(({ provider }) => <li key={provider} className="flex items-center justify-between gap-3 py-2.5">
             <div className="min-w-0 text-sm">
-              <p>{title}</p>
-              {detail && <p className="mt-0.5 text-xs leading-5 text-muted">{detail}</p>}
+              <p>{names[provider] ?? provider}登录已失效</p>
+              <p className="mt-0.5 text-xs text-muted">相关采集已暂停。</p>
             </div>
-            <button className="btn-sm shrink-0" type="button" onClick={() => goTo("logs")}>查看日志</button>
-          </li>;
-        })}
-      </ul> : <p className="text-sm text-muted">暂无异常。</p>}
-    </section>
+            <button className="btn-sm shrink-0" type="button" onClick={() => goTo("auth")}>去连接</button>
+          </li>)}
+          {issues.map(issue => {
+            const { title, detail } = describeIssue(issue);
+            return <li key={issue.kind === "paused" ? issue.provider + "-paused" : issue.kind === "disabled" ? issue.error + "-disabled" : issue.kind}
+              className="flex items-center justify-between gap-3 py-2.5">
+              <div className="min-w-0 text-sm">
+                <p>{title}</p>
+                {detail && <p className="mt-0.5 text-xs leading-5 text-muted">{detail}</p>}
+              </div>
+              <button className="btn-sm shrink-0" type="button" onClick={() => goTo("logs")}>查看日志</button>
+            </li>;
+          })}
+        </ul> : <p className="text-sm text-muted">暂无异常。</p>}
+      </section>
+    </div>
   </div>;
 }

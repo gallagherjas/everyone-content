@@ -26,9 +26,10 @@ const messages: Record<string, string> = {
   timeout: '等待超时，未检测到平台登录会话。请重新连接并完成页面验证。',
   browser_setup_failed: '专用浏览器安装失败，请检查网络后重新连接。',
   login_page_unavailable: '无法打开平台登录页，请检查到平台的网络连接后重试。',
+  session_read_failed: '无法读取登录状态，请重新扫码连接。',
   session_save_failed: '无法保存登录会话，请检查本机授权目录的写入权限后重试。',
   collection_busy: '采集正在运行，请等本轮结束后重新连接。',
-  failed: '无法完成登录，请检查网络及图形桌面环境后重试。',
+  failed: '无法完成登录，请重新连接。',
 };
 
 // 各平台的扫码登录配置:入口页、cookie 挑选(含哨兵校验)与会话文件名。
@@ -71,7 +72,7 @@ export const LOGIN_PLATFORMS: Record<string, LoginPlatform> = {
 interface Cookie { name: string; value: string; domain: string; path: string; expires: number }
 interface LoginWindow {
   cookies(): Promise<Cookie[]>;
-  userAgent(): Promise<string>;
+  userAgent: string;
   isClosed(): boolean;
   close(): Promise<void>;
 }
@@ -97,13 +98,15 @@ async function openLoginWindow(signal: AbortSignal, loginUrl: string, cookieUrl?
   }
   try {
     signal.throwIfAborted();
+    signal.addEventListener('abort', () => { void browser.close().catch(() => {}); }, { once: true });
     const context = await browser.newContext();
     const page = await context.newPage();
-    signal.addEventListener('abort', () => { void browser.close().catch(() => {}); }, { once: true });
+    // 扫码后页面可能立即跳转，先在空白页读取浏览器标识。
+    const userAgent = await page.evaluate(() => navigator.userAgent);
     await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 })
       .catch(() => { throw new Error(page.isClosed() ? 'window_closed' : 'login_page_unavailable'); });
     return {
-      cookies: () => context.cookies(cookieUrl), userAgent: () => page.evaluate(() => navigator.userAgent),
+      cookies: () => context.cookies(cookieUrl), userAgent,
       isClosed: () => page.isClosed() || !browser.isConnected(), close: () => browser.close(),
     };
   } catch (error) { await browser.close().catch(() => {}); throw error; }
@@ -194,10 +197,9 @@ export class PlatformLoginManager {
         if (job.window.isClosed()) { job.status = 'window_closed'; return; }
         if (this.clock() >= deadline) { job.status = 'timeout'; return; }
         const cookies = await job.window.cookies();
-        try { platform.pick(cookies); } catch { await this.sleep(); continue; }
-        const userAgent = await job.window.userAgent();
         job.abort.signal.throwIfAborted();
-        try { this.save(job.provider, job.accountId, cookies, userAgent); }
+        try { platform.pick(cookies); } catch { await this.sleep(); continue; }
+        try { this.save(job.provider, job.accountId, cookies, job.window.userAgent); }
         catch (error) {
           job.status = (error as Error)?.message === 'collection_busy' ? 'collection_busy' : 'session_save_failed';
           return;
@@ -208,7 +210,8 @@ export class PlatformLoginManager {
       if (!job.abort.signal.aborted) {
         const code = (error as Error)?.message ?? '';
         job.status = job.window?.isClosed() ? 'window_closed'
-          : ['browser_setup_failed', 'login_page_unavailable', 'window_closed'].includes(code) ? code : 'failed';
+          : ['browser_setup_failed', 'login_page_unavailable', 'window_closed'].includes(code) ? code
+          : job.status === 'waiting' ? 'session_read_failed' : 'failed';
       }
     }
     finally { await job.window?.close().catch(() => {}); }

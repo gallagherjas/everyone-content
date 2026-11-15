@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useApi, fmtNum, fmtTime, relTime } from "../api";
 import { Page } from "../components/Layout";
-import { Badge, Msg, NUM_TONE, VIDEO_BADGES } from "../components/Common";
+import { Badge, FilterSelect, Msg, NUM_TONE, VIDEO_BADGES } from "../components/Common";
 import { useNotices } from "../components/Notices";
 import { useCachedLoad } from "../components/PageCache";
 
@@ -34,6 +34,7 @@ export default function BloggersPage() {
   const [rows, setRows] = useState<BloggerRow[]>([]);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [active, setActive] = useState<string>("");
+  const [workSort, setWorkSort] = useState("time");
 
   const [failed, setFailed] = useState(false), [message, setMessage] = useState("");
   const load = useCallback(() => api<BloggerRow[]>("/api/bloggers").then(setRows).catch(() => setRows([])), [api]);
@@ -59,6 +60,8 @@ export default function BloggersPage() {
   }, [rows, api]);
   const bloggers = rows.filter(r => r.kind === "blogger"), pending = rows.filter(r => r.kind === "blogger_search");
   const current = bloggers.find(b => String(b.id) === active);
+  const works = detail?.works ?? [];
+  const sortedWorks = workSort === "likes" ? works.slice().sort((a, b) => (b.likes ?? -1) - (a.likes ?? -1)) : works;
   // 进入页面默认选中第一个博主。
   useEffect(() => { if (!active && bloggers.length) setActive(String(bloggers[0].id)); }, [active, bloggers]);
 
@@ -101,10 +104,13 @@ export default function BloggersPage() {
           )}
 
           <section className="panel">
-            <h3 className="font-semibold text-lg">作品 · 近30天热门</h3>
-            {!detail.works.length && <p className="mt-4 text-sm text-muted">近30天暂无上榜作品；数据随每轮采集更新。</p>}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="font-semibold text-lg">作品 · 近30天</h3>
+              <FilterSelect label="博主作品排序" value={workSort} onChange={setWorkSort} options={[["time", "按时间"], ["likes", "按点赞"]]} />
+            </div>
+            {!works.length && <p className="mt-4 text-sm text-muted">近30天暂无采集作品。</p>}
             <div className="mt-4 space-y-2">
-              {detail.works.map(w => <div key={w.id} className="rounded-lg border border-line/70 bg-canvas/50 px-3 py-2.5">
+              {sortedWorks.map(w => <div key={w.id} className="rounded-lg border border-line/70 bg-canvas/50 px-3 py-2.5">
                 <div className="flex items-center gap-2">
                   <a className="link min-w-0 flex-1 truncate text-sm" href={w.url} target="_blank" rel="noreferrer">{w.title || w.id}</a>
                   {!!w.badges?.length && <span className="flex shrink-0 gap-1">{w.badges.map(b => <Badge key={b} tone={VIDEO_BADGES[b]?.tone ?? "gray"}>{VIDEO_BADGES[b]?.label ?? b}</Badge>)}</span>}

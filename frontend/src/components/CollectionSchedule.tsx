@@ -120,7 +120,7 @@ export default function CollectionSchedule({ account, onSaved, budgets, credenti
     </CollectionRow>;
   };
   return <form onSubmit={save} className="space-y-3">
-    <p className="text-xs text-muted">运行时间为北京时间。每日额度按来源跨账号共用，08:00 重置。</p>
+    <p className="text-xs text-muted">运行时间为北京时间。每日额度按来源跨账号共用，00:00 重置。</p>
     <fieldset disabled={disabled} className="space-y-5">
       <div className="space-y-2">
         <h3 className="text-base font-semibold">抖音指数采集</h3>

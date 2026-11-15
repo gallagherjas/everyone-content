@@ -1,10 +1,10 @@
 import { ReadClient,loadAuth } from '../sources/douyin-index/client.ts';
-import { requestFor,semanticHash } from '../sources/douyin-index/protocol.ts';
+import { indexEffectiveVersion,requestFor,semanticHash,usesTopicDates } from '../sources/douyin-index/protocol.ts';
 import { SNAPSHOT_PLATFORMS,snapshotExecute } from '../sources/platform/snapshot.ts';
-import { atomic,taskKey,taskInScope,scheduledTaskEnabled, type CollectionStore } from './store.ts';
+import { atomic,freshSnapshots,taskKey,taskInScope,scheduledTaskEnabled, type CollectionStore } from './store.ts';
 import { parseJson } from '../../lib/json.ts';
 import { COLLECTION_SCOPES } from '../../lib/collection-schedule.ts';
-import { COLLECTION_DAY_MS, collectionDay, nextCollectionDay } from '../../lib/time.ts';
+import { COLLECTION_DAY_MS, collectionDay, collectionDayStart, nextCollectionDay, parseCollectionDay } from '../../lib/time.ts';
 
 import { planCollection } from './planner.ts';
 const HOUR=3600000;
@@ -37,18 +37,17 @@ async function execute(store: CollectionStore,run: any,client: any,clock: ()=>nu
   if (run.provider !== 'index') return snapshotExecute(store,run,client,clock);
   const spec=JSON.parse(run.request);
   const credential=store.db.prepare('SELECT c.auth_path FROM collection_credentials c JOIN collection_task_accounts a ON a.account_id=c.account_id WHERE a.task_key=? AND c.scope=? LIMIT 1').get(run.task_key,run.scope) as any;
-  // 两个数据域各自先取有效日：话题域(topic_*/videos)与达友域(author_*)，日期任务本身不依赖前置。
-  const domain=['topic_dates','author_dates'].includes(spec.type)?null:spec.type.startsWith('author_')?'author':'topic';
-  const datesRun=domain?store.latest(taskKey('index',run.scope,{type:`${domain}_dates`})):null;
-  const dates={topic:domain==='topic'&&datesRun?store.data(datesRun):null,author:domain==='author'&&datesRun?store.data(datesRun):null};
-  if(domain&&!dates[domain])throw new Error('source_dates_missing');
-  const version=domain===null?null:spec.type==='topic_relation'?dates.topic.valid_week:domain==='author'?dates.author.datetime:dates.topic.valid_day;
-  const previous=store.latest(run.task_key);
-  if(domain===null?false:previous?.version===version)return {cached:previous,version};
+  const datesRun=usesTopicDates(spec.type)?store.latest(taskKey('index',run.scope,{type:'topic_dates'})):null;
+  const version=indexEffectiveVersion(spec.type,collectionDay(run.at_ms),datesRun?store.data(datesRun):null);
+  if(!version)throw new Error('source_dates_missing');
+  if(spec.type!=='topic_dates'){
+    const previous=store.latest(run.task_key);
+    if(previous?.version===version)return {cached:previous,version};
+  }
   const auth=loadAuth(credential?.auth_path,{});
-  const req=requestFor(spec,dates);
+  const req=requestFor(spec,version);
   const response=await new ReadClient(auth,{fetchImpl:client,intervalMs:1000,sleep:async()=>{}}).read(spec,req);
-  return {data:response.data,version:version??collectionDay(clock()),fingerprint:semanticHash(spec.type,response.data)};
+  return {data:response.data,version:spec.type==='topic_dates'?collectionDay(clock()):version,fingerprint:semanticHash(spec.type,response.data)};
 }
 
 export interface RunOptions {
@@ -62,7 +61,7 @@ export async function runCollection(store: CollectionStore,options: RunOptions={
   if(options.only&&!COLLECTION_SCOPES.includes(options.only))throw new Error('未知采集来源');
   const clock=options.clock??Date.now,sleep=options.sleep??(ms=>new Promise(r=>setTimeout(r,ms))),counts: Record<string,number>={};
   const accounts=planCollection(store,{...options,now:clock()}),ids=accounts.map(a=>a.id),served: Record<number,number>={};
-  for(const a of accounts)served[a.id]=(store.db.prepare("SELECT COUNT(*) n FROM collection_run_accounts a JOIN collection_runs r ON r.id=a.run_id WHERE a.account_id=? AND r.observed_at>=?").get(a.id,collectionDay(clock())) as any).n;
+  for(const a of accounts)served[a.id]=(store.db.prepare("SELECT COUNT(*) n FROM collection_run_accounts a JOIN collection_runs r ON r.id=a.run_id WHERE a.account_id=? AND r.at_ms>=?").get(a.id,collectionDayStart(clock())) as any).n;
   const visited=new Set<string>();
   const due=()=>store.dueTasks(ids,clock()).filter(task=>!visited.has(task.key)&&taskInScope(task,options.only));
   const compare=(a: any,b: any)=>{
@@ -76,7 +75,7 @@ export async function runCollection(store: CollectionStore,options: RunOptions={
   if(!options.scheduled&&options.only&&Object.hasOwn(SNAPSHOT_PLATFORMS,options.only)){
     const at=clock();
     for(const id of ids){
-      const snapshot=store.freshSnapshot(id,options.only,at);
+      const [snapshot]=freshSnapshots(store.db,id,at,options.only);
       if(!snapshot)continue;
       atomic(store.db,()=>{
         const run=store.begin(snapshot,at,null,[id]);
@@ -101,10 +100,7 @@ export async function runCollection(store: CollectionStore,options: RunOptions={
     tasks.sort(compare);const task=tasks.shift()!;
     visited.add(task.key);done++;total=Math.max(total,done+tasks.length);
     options.progress?.(Math.min(99,Math.round(done*100/total)));
-    if(task.provider==='index'&&!['topic_dates','author_dates'].includes(task.operation)){
-      const datesType=task.operation.startsWith('author_')?'author_dates':'topic_dates';
-      if(!store.latest(taskKey('index',task.scope,{type:datesType})))continue;
-    }
+    if(task.provider==='index'&&usesTopicDates(task.operation)&&!store.latest(taskKey('index',task.scope,{type:'topic_dates'})))continue;
     if((store.db.prepare('SELECT paused FROM collection_provider_state WHERE provider=? AND scope=?').get(task.provider,task.scope) as any)?.paused)continue;
     const assigned=new Set(store.accounts(task.key).map((a: any)=>a.id));
     const participants=accounts.filter(a=>assigned.has(a.id)&&(!options.scheduled||options.only||scheduledTaskEnabled(a.config.schedules,task))).map(a=>a.id);
@@ -122,7 +118,9 @@ export async function runCollection(store: CollectionStore,options: RunOptions={
     try {
       const result=await execute(store,run,transport(store,run,counts,options.fetchImpl??fetch,sleep,clock,options.requestLimit),clock);
       const finishedAt=clock();
-      let next=nextCollectionDay(task.provider==='index'?finishedAt:Date.parse(result.version));
+      const nextFrom=task.provider!=='index' ? parseCollectionDay(result.version)
+        : task.operation.startsWith('author_') ? run.at_ms : finishedAt;
+      let next=nextCollectionDay(nextFrom);
       if(result.cached){
         store.reuse(run.id,result.cached.id,result.version);
         summary.cached++;
@@ -130,8 +128,8 @@ export async function runCollection(store: CollectionStore,options: RunOptions={
         // 指数的事实由 rebuildAccount 在读取侧落库;创作后台快照在此直接写观测。
         const project = task.provider==='index' ? ()=>{} : (finished: any,data: any)=>store.observation(finished,'account',data.uid,'account',data.metrics);
         store.finish(run,result.data,result.version,result.fingerprint,project,finishedAt);summary.completed++;
-        if(task.provider==='index'&&task.operation.endsWith('_dates')){
-          const effective=result.data.valid_day??result.data.datetime;
+        if(task.provider==='index'&&task.operation==='topic_dates'){
+          const effective=result.data.valid_day;
           const lag=effective&&effective<collectionDay(finishedAt-COLLECTION_DAY_MS).replaceAll('-','');
           const attempts=(store.db.prepare("SELECT COUNT(*) n FROM collection_runs WHERE task_key=? AND status='ok' AND version=?").get(task.key,result.version) as any).n;
           if(lag&&attempts<2)next=Math.min(next,finishedAt+6*HOUR);
@@ -153,7 +151,9 @@ export async function runCollection(store: CollectionStore,options: RunOptions={
       const code=controlledError(error);
       if(/^(daily|tick)_budget_exhausted$/.test(code)){
         store.db.prepare("UPDATE collection_runs SET status='deferred',error=? WHERE id=?").run(code,run.id);
-        store.release(task,code.startsWith('daily')?nextCollectionDay(clock()):clock()+300000,code);exhausted.add(task.provider);defer(true);
+        const retryAt=(error as {retryAt?:number})?.retryAt;
+        const next=code==='daily_budget_exhausted' ? retryAt??nextCollectionDay(clock()) : clock()+300000;
+        store.release(task,next,code);exhausted.add(task.provider);defer(true);
       }else{store.fail(run,code,clock());summary.failed++;for(const id of participants)summary.accounts[id].failed++;if(code==='service_unavailable')exhausted.add(task.provider);}
       options.log?.(`${task.provider}/${task.operation} ${task.target}：${code}`,participants);
     }

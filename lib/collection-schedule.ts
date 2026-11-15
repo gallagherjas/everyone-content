@@ -19,7 +19,7 @@ export type CollectionSchedules = Record<ScheduleScope, CollectionSchedule>;
 
 export function defaultSchedules(): CollectionSchedules {
   return Object.fromEntries(SCHEDULE_SCOPES.map(scope => [scope, {
-    enabled: false, times: ['10:00'], request_limit: 10,
+    enabled: false, times: ['00:00'], request_limit: 10,
   }])) as CollectionSchedules;
 }
 

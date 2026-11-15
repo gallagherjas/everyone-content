@@ -58,6 +58,28 @@ test('队列列出全部账号任务，待执行计数与可执行状态一致',
   assert.deepEqual(collectionStatus(db,{...account(db,1),status:'archived'},null).queue,{total:105,due:0});
  }finally{db.close();}
 });
+test('本日已采覆盖指数数据，官方新版出现时仍显示待执行',async()=>{
+ const {db,store}=setup();try{
+  auth(db,1,'valid');
+  config(db,1,{index:{discovery:null,tasks:[{type:'topic_search',keyword:'指数缓存'}]}});
+  const fetchImpl=async(input:RequestInfo|URL)=>String(input).endsWith('get_topic_valid_date')
+    ? json({data:{valid_day:'20261105',valid_week:'20261101'}})
+    : json({data:{topic_list:[]}});
+  await runCollection(store,{accountIds:[1],only:'topic_rank',clock:()=>base,fetchImpl,sleep:async()=>{}});
+  const status=(at=base+1000)=>collectionStatus(db,account(db,1),store,at).tasks;
+  assert.equal(status().find(t=>t.operation==='topic_dates')?.status,'collected');
+  const afterRecheckTime=status(base+6*HOUR+1000).find(t=>t.operation==='topic_dates')!;
+  assert.equal(afterRecheckTime.next_run_at,base+6*HOUR);
+  assert.equal(afterRecheckTime.status,'collected');
+  assert.equal(status(base+DAY).find(t=>t.operation==='topic_dates')?.status,'due');
+  assert.equal(status().find(t=>t.operation==='topic_search')?.status,'collected');
+  db.prepare("UPDATE collection_tasks SET next_run_at=0 WHERE operation='topic_search'").run();
+  assert.equal(status().find(t=>t.operation==='topic_search')?.status,'collected');
+  const artifact=store.artifact({valid_day:'20261107',valid_week:'20261101'});
+  db.prepare("UPDATE collection_runs SET data_path=?,data_sha=? WHERE operation='topic_dates'").run(artifact.path,artifact.sha);
+  assert.equal(status().find(t=>t.operation==='topic_search')?.status,'due');
+ }finally{db.close();}
+});
 test('某账号登录失效不影响另一账号，同词查询与结果归属隔离',async()=>{
  const {db,store}=setup();try{
   const second=createAccount(db,'独立账号');
@@ -65,7 +87,6 @@ test('某账号登录失效不影响另一账号，同词查询与结果归属�
   const calls=[],fetchImpl=async(input,init)=>{
    const u=new URL(String(input));calls.push({path:u.pathname,cookie:init.headers.cookie});if(init.headers.cookie==='expired')return json({},401);
    if(u.pathname.endsWith('get_topic_valid_date'))return json({data:{valid_day:'20261105',valid_week:'20261101'}});
-   if(u.pathname.endsWith('get_greater_users_valid_date'))return json({data:{datetime:'20261104'}});
    if(u.pathname.endsWith('query_topic'))return json({data:{topic_list:[]}});
    if(u.pathname.endsWith('itemQuery'))return json({data:{data:[{itemId:'991',title:'本账号可见作品',likes:'500'}]}});throw new Error('unexpected mock');
   };
@@ -119,16 +140,37 @@ test('平台快照遇请求间隔即延后到窗口时刻，不占额度不睡�
   assert.equal(db.prepare("SELECT failures,error FROM collection_tasks WHERE provider='douyin'").get().failures,0);
  }finally{db.close();}
 });
+test('跨午夜预留请求时按实际预留日计算额度和下一次可采时间',async()=>{
+ const {db,store}=setup();try{
+  const second=createAccount(db,'同平台另一账号');
+  const file=join(root,'quota-midnight.json');writeFileSync(file,JSON.stringify({cookie:'ok'}),{mode:0o600});
+  registerAuth(store,1,file,'xhs');
+  db.prepare("UPDATE collection_limits SET interval_ms=60000,daily_limit=1 WHERE provider='xhs'").run();
+  const midnight=Date.UTC(2026,10,15,16);
+  const other=store.queue('xhs',`account:${second.id}`,{type:'account_snapshot'},[{id:second.id,configSha:'test'}]);
+  store.reserve(store.begin(other,midnight),'/snapshot',midnight);
+  const result=await runCollection(store,{accountIds:[1],only:'xhs',clock:()=>midnight-1000,sleep:async()=>{},
+    fetchImpl:()=>assert.fail('预留日额度已用完')});
+  assert.equal(result.deferred,1);
+  const t=db.prepare("SELECT error,next_run_at FROM collection_tasks WHERE provider='xhs' AND scope='account:1'").get()!;
+  assert.equal(t.error,'daily_budget_exhausted');
+  assert.equal(t.next_run_at,midnight+DAY);
+ }finally{db.close();}
+});
 test('快照同一采集日复用，换日可重新采集，趋势与旧任务都按同一日界线',async()=>{
  const {db,store}=setup();try{
   const file=join(root,'daily-xhs.json');writeFileSync(file,JSON.stringify({cookie:'ok'}),{mode:0o600});
   registerAuth(store,1,file,'xhs');
-  const cutoff=Date.UTC(2026,10,16), first=cutoff-12*HOUR;
+  const cutoff=Date.UTC(2026,10,15,16), first=cutoff-12*HOUR;
   let requests=0;
   const opts={accountIds:[1],only:'xhs',fetchImpl:async()=>json({code:0,data:{fans_count:++requests}}),sleep:async()=>{}};
   const task=()=>db.prepare("SELECT key,next_run_at FROM collection_tasks WHERE provider='xhs'").get()!;
   assert.equal((await runCollection(store,{...opts,clock:()=>first})).completed,1);
   assert.equal(task().next_run_at,cutoff);
+  const status=(now: number)=>collectionStatus(db,account(db,1),store,now);
+  assert.equal(status(cutoff-1).tasks[0].status,'collected');
+  assert.equal(status(cutoff-1).queue.due,0);
+  assert.equal(status(cutoff).tasks[0].status,'due');
   db.prepare('UPDATE collection_tasks SET next_run_at=? WHERE key=?').run(first+DAY,task().key);
   db.exec('PRAGMA user_version=5');
   migrate(db,':memory:');
@@ -139,6 +181,7 @@ test('快照同一采集日复用，换日可重新采集，趋势与旧任务�
   assert.equal(task().next_run_at,cutoff);
 
   registerAuth(store,1,file,'xhs');
+  assert.equal(status(cutoff-HOUR).tasks[0].status,'due');
   assert.equal((await runCollection(store,{...opts,clock:()=>cutoff-HOUR})).completed,1);
   const cached=monitorOverview(db,1,cutoff-1).platforms.xhs;
   assert.deepEqual(cached.series.map(point=>[point.at,point.fans]),[['2026-11-15',2]]);
@@ -153,7 +196,7 @@ test('跨采集日收到快照时从新的一天复用缓存',async()=>{
  const {db,store}=setup();try{
   const file=join(root,'midnight-xhs.json');writeFileSync(file,JSON.stringify({cookie:'ok'}),{mode:0o600});
   registerAuth(store,1,file,'xhs');
-  const cutoff=Date.UTC(2026,10,16);
+  const cutoff=Date.UTC(2026,10,15,16);
   let now=cutoff-1000;
   const opts={accountIds:[1],only:'xhs',clock:()=>now,sleep:async()=>{},
     fetchImpl:async()=>{now=cutoff+1000;return json({code:0,data:{fans_count:3}});}};
@@ -186,9 +229,43 @@ test('B站总览单请求采集，未登录时提示重连，成功后同日复�
   assert.equal(calls,2);
   assert.equal((await runCollection(store,{...opts,fetchImpl:snapshot})).cached,1);
   assert.equal(calls,2);
-  now=Date.UTC(2026,10,8);
+  now=Date.UTC(2026,10,7,16);
   assert.equal((await runCollection(store,{...opts,fetchImpl:snapshot})).completed,1);
   assert.equal(calls,3);
+ }finally{db.close();}
+});
+test('迁移旧采集日：凌晨额度、快照与日期检查移入北京时间当日，官方内容版本保留',()=>{
+ const {db,store}=setup();try{
+  const now=Date.UTC(2026,10,15,16,30);
+  const oldBoundary=Date.UTC(2026,10,16),newBoundary=Date.UTC(2026,10,16,16);
+  const owner=[{id:1,configSha:'test'}];
+  const snapshot=store.queue('xhs','account:1',{type:'account_snapshot'},owner);
+  const previous=store.begin(snapshot,now);
+  const slot=store.reserve(previous,'/snapshot',now);
+  store.requestResult(slot.id,'{}',200);
+  db.prepare("UPDATE collection_requests SET day='2026-11-15' WHERE id=?").run(slot.id);
+  store.finish(previous,{metrics:{fans:3}},'2026-11-15','test',
+    (run,data)=>store.observation(run,'account','self','account',data.metrics),now+1000);
+  const cached=store.begin(snapshot,now+2000);
+  store.reuse(cached.id,previous.id,'2026-11-15');
+  const dates=store.queue('index','account:1',{type:'topic_dates'},owner);
+  const datesRun=store.begin(dates,now);
+  store.finish(datesRun,{valid_day:'20261115',valid_week:'20261109'},'2026-11-15','dates',()=>{},now);
+  const content=store.queue('index','account:1',{type:'topic_search',keyword:'原官方版本'},owner);
+  store.finish(store.begin(content,now),{topic_list:[]},'20261115','content',()=>{},now);
+  for(const t of [snapshot,dates,content])db.prepare('UPDATE collection_tasks SET next_run_at=? WHERE key=?').run(oldBoundary,t.key);
+  db.exec('PRAGMA user_version=6');
+  migrate(db,':memory:');
+  assert.equal(db.prepare('SELECT day FROM collection_requests WHERE id=?').get(slot.id)?.day,'2026-11-16');
+  assert.equal(db.prepare('SELECT effective_at FROM collection_observations WHERE run_id=?').get(previous.id)?.effective_at,'2026-11-16');
+  assert.equal(db.prepare('SELECT version FROM collection_runs WHERE id=?').get(cached.id)?.version,'2026-11-16');
+  assert.equal(store.latest(dates.key).version,'2026-11-16');
+  assert.equal(store.data(store.latest(dates.key)).valid_day,'20261115');
+  assert.equal(store.latest(content.key).version,'20261115');
+  const status=collectionStatus(db,account(db,1),store,now+5000);
+  assert.ok(status.tasks.every(t=>t.next_run_at===newBoundary));
+  assert.equal(status.budgets.find(b=>b.provider==='xhs').used,1);
+  assert.equal(status.tasks.find(t=>t.provider==='xhs')?.status,'collected');
  }finally{db.close();}
 });
 test('重连同日仍实采验证，未登录响应暂停对应来源，其他平台可正常完成',async()=>{
@@ -308,7 +385,7 @@ test('指数客户端保留配额异常，只排队一次，不伪造批量网�
  const {db,store}=setup();try{
   config(db,1,{index:{discovery:null,tasks:[{type:'videos',keyword:'第一个词'},{type:'videos',keyword:'第二个词'}]}});auth(db,1,'valid');
   db.prepare("UPDATE collection_limits SET daily_limit=1 WHERE provider='index'").run();let calls=0;
-  const fetchImpl=async input=>{calls++;return json({data:new URL(String(input)).pathname.endsWith('get_topic_valid_date')?{valid_day:'20261105',valid_week:'20261101'}:{datetime:'20261104'}});};
+  const fetchImpl=async()=>{calls++;return json({data:{valid_day:'20261105',valid_week:'20261101'}});};
   const r=await runCollection(store,{accountIds:[1],clock:()=>base,fetchImpl,sleep:async()=>{}});
   assert.equal(calls,1);assert.equal(r.failed,0);assert.equal(r.deferred,1);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM collection_runs WHERE status='failed'").get().n,0);
@@ -401,12 +478,13 @@ test('博主链路：昵称搜索解析为博主，作品按指数落库并进�
   auth(db,1,'valid');
   db.prepare("INSERT INTO account_sources(account_id,kind,source_key,name) VALUES(1,'blogger_search','AI 造物笔记','AI 造物笔记')").run();
   const workRow=(id: string,text: string,likes: number,extra={})=>({item_id:id,video_text:text,like_cnt:String(likes),coment_cnt:'5',share_cnt:'2',follow_cnt:'1',rank:1,create_time:'20261101',video_url:`https://www.douyin.com/video/${id}`,...extra});
-  const works={like_list:[workRow('7701','作品甲 #ai教程',100),workRow('7702','作品乙',60)],comment_list:[],share_list:[],
-   follow_list:[],index_list:[workRow('7701','作品甲 #ai教程',100)],create_time_list:[workRow('7702','作品乙',60,{create_time:'20261103'})]};
+  const newest=workRow('7702','作品乙',60,{create_time:'20261107'});
+  const sameDay=workRow('7703','作品丙',200,{create_time:'20261107'});
+  const works={like_list:[workRow('7701','作品甲 #ai教程',100),sameDay,newest],comment_list:[],share_list:[],
+   follow_list:[],index_list:[workRow('7701','作品甲 #ai教程',100)],create_time_list:[newest,sameDay]};
   const fetchImpl=async(input,init)=>{
    const p=new URL(String(input)).pathname;
    if(p.endsWith('get_topic_valid_date'))return json({data:{valid_day:'20261105',valid_week:'20261101'}});
-   if(p.endsWith('get_greater_users_valid_date'))return json({data:{datetime:'20261104'}});
    if(p.endsWith('query_topic'))return json({data:{topic_list:[]}});
    if(p.endsWith('itemQuery'))return json({data:{data:[]}});
    if(p.endsWith('get_sug_great_user_list')){assert.equal(JSON.parse(init.body).keyword,'AI 造物笔记');
@@ -420,15 +498,17 @@ test('博主链路：昵称搜索解析为博主，作品按指数落库并进�
   assert.equal(row.source_key,'diguser2');assert.equal(row.name,'AI 造物笔记');
   assert.deepEqual(JSON.parse(row.note),{secUid:'MS4wLjABAAAAWX1',fans:13277,likes:23973,items:33,tag1:'科技',tag2:'前沿科技',avatar:null});
   assert.equal(db.prepare("SELECT COUNT(*) n FROM account_sources WHERE kind='blogger_search'").get().n,0);
-  const work=db.prepare("SELECT w.url,w.title,w.author_id FROM works w JOIN account_works a ON a.work_id=w.id WHERE a.account_id=1 AND a.reason='index:blogger'").get();
+  const work=db.prepare("SELECT w.url,w.title,w.author_id FROM works w JOIN account_works a ON a.work_id=w.id WHERE a.account_id=1 AND a.reason='index:blogger' AND w.url LIKE '%/7701'").get();
   assert.equal(work.url,'https://www.douyin.com/video/7701');assert.equal(work.title,'作品甲 #ai教程');assert.equal(work.author_id,'MS4wLjABAAAAWX1');
-  assert.equal(db.prepare("SELECT COUNT(*) n FROM collection_observations WHERE kind='work' AND dimension='author_works'").get().n,2);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM collection_observations WHERE kind='work' AND dimension='author_works'").get().n,3);
   const overview=bloggerOverview(db,store,1);
-  assert.equal(overview.length,1);assert.equal(overview[0].worksCount,2);assert.equal(overview[0].profile.fans,13277);
+  assert.equal(overview.length,1);assert.equal(overview[0].worksCount,3);assert.equal(overview[0].profile.fans,13277);
   const detail=bloggerDetail(store,1,row);
-  assert.deepEqual(detail.works.map(w=>w.id),['7701','7702']); // 点赞 100 > 60
-  assert.equal(detail.works[0].likes,100);assert.equal(detail.works[0].url,'https://www.douyin.com/video/7701');
-  assert.equal(detail.works[1].publishedAt,'2026-11-03T00:00:00+08:00');assert.equal(detail.trend,null);
+  assert.deepEqual(detail.works.map(w=>w.id),['7702','7703','7701']);
+  assert.equal(detail.works[0].likes,60);assert.equal(detail.works[0].url,'https://www.douyin.com/video/7702');
+  assert.equal(detail.works[0].publishedAt,'2026-11-07T00:00:00+08:00');assert.equal(detail.trend,null);
+  db.prepare("UPDATE works SET published_at='2026-11-07 02:00:00' WHERE url LIKE '%/7703'").run();
+  assert.deepEqual(bloggerDetail(store,1,row).works.map(w=>w.id),['7703','7702','7701']);
  }finally{db.close();}
 });
 test('手动采集按范围独立：topic 只跑话题域，author 只跑达友域',async()=>{
@@ -437,27 +517,46 @@ test('手动采集按范围独立：topic 只跑话题域，author 只跑达友�
   db.prepare("INSERT INTO account_sources(account_id,kind,source_key,name) VALUES(1,'keyword','ai教程','ai教程')").run();
   auth(db,1,'valid');
   db.prepare("INSERT INTO account_sources(account_id,kind,source_key,name) VALUES(1,'blogger_search','AI 造物笔记','AI 造物笔记')").run();
-  const calls:string[]=[],TOPIC=['get_topic_valid_date','query_topic','itemQuery'],AUTHOR=['get_greater_users_valid_date','get_sug_great_user_list','get_great_user_top_video'];
-  const fetchImpl=async(input: any)=>{
+  const legacy=store.queue('index','account:1',{type:'author_dates'},[{id:1,configSha:'legacy'}]);
+  const legacyRun=store.begin(legacy,base-DAY);
+  store.finish(legacyRun,{datetime:'20261104'},'2026-11-06','legacy',()=>{},base-DAY);
+  db.exec('PRAGMA user_version=7');
+  migrate(db,':memory:');
+  const migrated=collectionStatus(db,account(db,1),store,base);
+  assert.ok(!migrated.tasks.some(t=>t.operation==='author_dates'));
+  assert.ok(migrated.runs.some(r=>r.id===legacyRun.id));
+  const calls:string[]=[],windows: {start_date:string;end_date:string}[]=[];
+  const fetchImpl=async(input: any,init: any)=>{
    const p=new URL(String(input)).pathname;calls.push(p.split('/').pop()!);
    if(p.endsWith('get_topic_valid_date'))return json({data:{valid_day:'20261105',valid_week:'20261101'}});
-   if(p.endsWith('get_greater_users_valid_date'))return json({data:{datetime:'20261104'}});
    if(p.endsWith('query_topic'))return json({data:{topic_list:[]}});
    if(p.endsWith('itemQuery'))return json({data:{data:[]}});
    if(p.endsWith('get_sug_great_user_list'))return json({data:{userlist:[{user_id:'diguser2',user_name:'AI 造物笔记',follow_count:'13277',aweme_url:'https://www.douyin.com/user/MS4wLjABAAAAWX1'}]}});
-   if(p.endsWith('get_great_user_top_video'))return json({data:{like_list:[{item_id:'7701',video_text:'作品甲 #ai教程',like_cnt:'100',coment_cnt:'5',share_cnt:'2',follow_cnt:'1',rank:1,create_time:'20261101',video_url:'https://www.douyin.com/video/7701'}],comment_list:[],share_list:[],follow_list:[],index_list:[],create_time_list:[]}});
+   if(p.endsWith('get_great_user_top_video')){
+    const {start_date,end_date}=JSON.parse(init.body);
+    windows.push({start_date,end_date});
+    return json({data:{like_list:[],comment_list:[],share_list:[],follow_list:[],index_list:[],create_time_list:[]}});
+   }
    throw new Error('unexpected '+p);
   };
   // 先独立采达友域：昵称解析为博主、作品落库，同时到期的话题任务不被触碰。
-  const author=await runCollection(store,{accountIds:[1],only:'author',clock:()=>base,fetchImpl,sleep:async()=>{}});
-  assert.equal(author.failed,0);assert.equal(author.completed,3); // author_dates + author_search + author_works
-  assert.equal(calls.filter(p=>AUTHOR.includes(p)).length,3);assert.equal(calls.filter(p=>TOPIC.includes(p)).length,0);
+  const opts={accountIds:[1],fetchImpl,sleep:async()=>{}};
+  const author=await runCollection(store,{...opts,only:'author',clock:()=>base});
+  assert.equal(author.failed,0);assert.equal(author.completed,2);
+  assert.equal(collectionStatus(db,account(db,1),store,base+1000).tasks.find(t=>t.operation==='author_works')?.status,'collected');
+  assert.deepEqual(calls,['get_sug_great_user_list','get_great_user_top_video']);
   assert.equal(db.prepare("SELECT source_key FROM account_sources WHERE kind='blogger'").get().source_key,'diguser2');
   calls.length=0;
-  // 再独立采话题域：跨日后到期、版本已更新的达友域日期任务不被触碰。
-  const topic=await runCollection(store,{accountIds:[1],only:'topic',clock:()=>base+DAY+60000,fetchImpl,sleep:async()=>{}});
+  const midnight=Date.UTC(2026,10,7,16);
+  await runCollection(store,{...opts,only:'author',clock:()=>midnight-1});
+  assert.deepEqual(calls,[]);
+  const topic=await runCollection(store,{...opts,only:'topic',clock:()=>midnight});
   assert.equal(topic.failed,0);assert.equal(topic.completed,4); // topic_dates + topic_search + 两个视频窗口
-  assert.equal(calls.filter(p=>TOPIC.includes(p)).length,4);assert.equal(calls.filter(p=>AUTHOR.includes(p)).length,0);
+  assert.deepEqual(calls,['get_topic_valid_date','query_topic','itemQuery','itemQuery']);
+  calls.length=0;
+  await runCollection(store,{...opts,only:'author',clock:()=>midnight});
+  assert.deepEqual(calls,['get_great_user_top_video']);
+  assert.deepEqual(windows,[{start_date:'20261009',end_date:'20261107'},{start_date:'20261010',end_date:'20261108'}]);
  }finally{db.close();}
 });
 test('话题和视频独立采集有效期，达人跟随视频，定时只执行启用的范围',async()=>{

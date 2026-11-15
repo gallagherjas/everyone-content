@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { formatTime, parseTime } from '../lib/time.ts';
+import { collectionDay, collectionDayStart, formatTime, nextCollectionDay, parseCollectionDay, parseTime } from '../lib/time.ts';
 
 test('数据库时间、带时区时间和毫秒时间戳统一显示北京时间，跨日也正确', () => {
   const expected = '2026-11-10 00:15:30';
@@ -23,4 +23,13 @@ test('北京时间显示和表单输入不依赖设备所在时区', () => {
     if (previous === undefined) delete process.env.TZ;
     else process.env.TZ = previous;
   }
+});
+
+test('采集日、当日开始和次日开始都在北京时间午夜换日', () => {
+  const midnight = Date.UTC(2026, 10, 15, 16);
+  assert.equal(collectionDay(midnight-1), '2026-11-15');
+  assert.equal(collectionDay(midnight), '2026-11-16');
+  assert.equal(collectionDayStart(midnight+1), midnight);
+  assert.equal(parseCollectionDay('2026-11-16'), midnight);
+  assert.equal(nextCollectionDay(midnight-1), midnight);
 });

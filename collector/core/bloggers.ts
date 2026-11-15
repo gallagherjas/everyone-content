@@ -5,6 +5,7 @@ import { identity } from './projection.ts';
 import { taskKey, type CollectionStore } from './store.ts';
 import { upsertAuthor,upsertWork,workUrl } from '../../lib/works.ts';
 import { linkWork } from '../../lib/accounts.ts';
+import { parseTime } from '../../lib/time.ts';
 
 export interface BloggerProfile { secUid: string | null; fans: number | null; likes: number | null; items: number | null; tag1: string | null; tag2: string | null; avatar: string | null }
 export const profileOf = (row: any): Partial<BloggerProfile> => { try { return JSON.parse(row.note||'{}'); } catch { return {}; } };
@@ -23,7 +24,7 @@ function worksFromCapture(data: any) {
         title: String(row.video_text ?? '').trim(),
         likes: count(row.like_cnt), comments: count(row.coment_cnt ?? row.comment_cnt),
         shares: count(row.share_cnt), follows: count(row.follow_cnt),
-        publishedAt: /^\d{8}$/.test(day) ? `${day.slice(0,4)}-${day.slice(4,6)}-${day.slice(6,8)}T00:00:00+08:00` : null,
+        publishedAt: /^\d{8}$/.test(day) ? `${day.slice(0,4)}-${day.slice(4,6)}-${day.slice(6,8)}T00:00:00+08:00` : hit.publishedAt ?? null,
         url: String(row.video_url ?? '') || workUrl(id) });
     }
   }
@@ -92,7 +93,7 @@ export function bloggerOverview(db: DatabaseSync, store: CollectionStore, accoun
     });
 }
 
-/** API 详情视图：概览合并最新 info、作品列表(指数降序)与 core 日增序列。 */
+/** API 详情视图：概览合并最新 info、作品列表与 core 日增序列。 */
 export function bloggerDetail(store: CollectionStore, accountId: number, row: any): any | null {
   const db = store.db;
   const scope = (db.prepare("SELECT scope FROM collection_credentials WHERE account_id=? AND provider='index'").get(accountId) as any)?.scope;
@@ -116,10 +117,13 @@ export function bloggerDetail(store: CollectionStore, accountId: number, row: an
         return acc;
       }, new Map())
     : new Map<string, { publishedAt?: string; badges?: string[] }>();
+  const recentOrder = new Map<string, number>(works?.data.create_time_list?.map((w: any, i: number) => [String(w?.item_id ?? ''), i]));
   return { id: row.id, userId: row.source_key, name: row.name, status: row.status, profile,
     options: (() => { try { return JSON.parse(row.options || '{}'); } catch { return {}; } })(),
-    works: works ? worksFromCapture(works.data).sort((a, b) => (b.likes ?? 0) - (a.likes ?? 0))
-      .map(w => ({ ...w, publishedAt: shared.get(w.id)?.publishedAt ?? w.publishedAt, badges: shared.get(w.id)?.badges ?? [] })) : [],
+    works: works ? worksFromCapture(works.data)
+      .map(w => ({ ...w, publishedAt: shared.get(w.id)?.publishedAt ?? w.publishedAt, badges: shared.get(w.id)?.badges ?? [] }))
+      .sort((a, b) => (parseTime(b.publishedAt)?.getTime() ?? -Infinity) - (parseTime(a.publishedAt)?.getTime() ?? -Infinity)
+        || (recentOrder.get(a.id) ?? Infinity) - (recentOrder.get(b.id) ?? Infinity)) : [],
     trend: core ? { fans: (core.data.fanslistday ?? []).map((r: any) => ({ date: r.date, count: count(r.count) })),
       likes: (core.data.likelistday ?? []).map((r: any) => ({ date: r.date, count: count(r.count) })),
       summary: { newFansDay: count(core.data.fans_info?.new_fans_count_by_day), newFansWeek: count(core.data.fans_info?.new_fans_count_by_week) } } : null,

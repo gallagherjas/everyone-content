@@ -18,7 +18,11 @@ export function formatTime(value: TimeValue): string {
   return date ? formatter.format(date) : '—';
 }
 
-// 采集日与每日额度共用 UTC 换日，即北京时间 08:00。
+// 采集日使用北京时间自然日，存储时间戳仍为 UTC。
 export const COLLECTION_DAY_MS = 86400000;
-export const collectionDay = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
-export const nextCollectionDay = (ms: number): number => (Math.floor(ms / COLLECTION_DAY_MS) + 1) * COLLECTION_DAY_MS;
+export const BEIJING_OFFSET_MS = 8 * 3600000;
+export const collectionDay = (ms: number): string => new Date(ms + BEIJING_OFFSET_MS).toISOString().slice(0, 10);
+export const collectionDayStart = (ms: number): number =>
+  Math.floor((ms + BEIJING_OFFSET_MS) / COLLECTION_DAY_MS) * COLLECTION_DAY_MS - BEIJING_OFFSET_MS;
+export const parseCollectionDay = (day: string): number => Date.parse(day) - BEIJING_OFFSET_MS;
+export const nextCollectionDay = (ms: number): number => collectionDayStart(ms) + COLLECTION_DAY_MS;

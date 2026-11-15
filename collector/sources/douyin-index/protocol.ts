@@ -10,10 +10,19 @@ export const PATHS: Record<string, string> = {
   topic_dates: '/api/v2/index/get_topic_valid_date',
   topic_search: '/api/v2/index/query_topic', videos: '/api/v2/index/itemQuery',
   topic_relation: '/api/v2/index/get_topic_relation',
-  author_dates: '/api/v2/daren/get_greater_users_valid_date', author_search: '/api/v2/daren/get_sug_great_user_list',
+  author_search: '/api/v2/daren/get_sug_great_user_list',
   author_info: '/api/v2/daren/get_author_info', author_works: '/api/v2/daren/get_great_user_top_video',
   author_core: '/api/v2/daren/get_great_user_mile_Info',
 };
+export function usesTopicDates(type: string): boolean {
+  return type === 'videos' || (type.startsWith('topic_') && type !== 'topic_dates');
+}
+export type TopicDates = { valid_day: string; valid_week: string };
+export function indexEffectiveVersion(type: string, day: string, dates?: TopicDates | null) {
+  if (type === 'topic_dates') return day;
+  if (type.startsWith('author_')) return day.replaceAll('-', '');
+  return type === 'topic_relation' ? dates?.valid_week : dates?.valid_day;
+}
 export function decode(text: string, mode: string | null): any {
   let body = parseJson(text);
   if (mode) {
@@ -25,35 +34,34 @@ export function decode(text: string, mode: string | null): any {
   return body;
 }
 export const unwrap = (body: any): any => body?.data ?? body;
-const date = (value: any) => { if (!/^\d{8}$/.test(value ?? '')) throw new Error('valid_date_missing'); return value; };
-function window(end: string, days: number) {
-  date(end);
+function window(end: string | undefined, days: number) {
+  if (!end || !/^\d{8}$/.test(end)) throw new Error('valid_date_missing');
   const d = new Date(`${end.slice(0,4)}-${end.slice(4,6)}-${end.slice(6,8)}T00:00:00Z`);
   if (d.toISOString().slice(0,10).replaceAll('-','') !== end) throw new Error('invalid_date');
   d.setUTCDate(d.getUTCDate() - days + 1);
   return { begin_date:d.toISOString().slice(0,10).replaceAll('-',''),end_date:end };
 }
-export function requestFor(task: any, dates: any): { path: string; method: string; payload: any } {
+export function requestFor(task: any, effectiveDate?: string): { path: string; method: string; payload: any } {
   const { type, id, keyword } = task;
   if (!Object.hasOwn(PATHS,type)) throw new Error('endpoint_not_allowed');
-  if (['topic_dates','author_dates'].includes(type)) return {path:PATHS[type],method:'GET',payload:null};
+  if (type === 'topic_dates') return {path:PATHS[type],method:'GET',payload:null};
   if (['topic_search','videos','author_search'].includes(type) && (typeof keyword !== 'string' || !keyword.trim() || keyword.length > 100)) throw new Error('invalid_keyword');
   if (type === 'videos' && ![7, 30].includes(task.days)) throw new Error('invalid_video_window');
   if (type === 'topic_relation' && !/^\d+$/.test(id ?? '')) throw new Error('topic_id_required');
   if (type.startsWith('author_') && type !== 'author_search' && !/^[a-z0-9]+$/.test(id ?? '')) throw new Error('author_id_required');
   let payload: any;
   if (type === 'topic_search') {
-    const range = window(dates.topic.valid_day,30);
+    const range = window(effectiveDate,30);
     payload = {param:{app_name:'aweme',keyword,start_date:range.begin_date,end_date:range.end_date}};
   }
   else if (type === 'videos') payload = {query:keyword,authorIds:[],categoryId:'0',dateType:task.days,labelType:0,durationType:0};
   else if (type === 'author_search') payload = {keyword,total:'20'};
   else if (type.startsWith('topic_')) {
-    const range = window(dates.topic.valid_week, 7);
+    const range = window(effectiveDate, 7);
     payload = {app_name:'aweme',topic_ids:[id],...range};
   } else {
     payload = {user_id:id};
-    if (type === 'author_works') { const range = window(dates.author.datetime,30); payload = {user_id:id,start_date:range.begin_date,end_date:range.end_date}; }
+    if (type === 'author_works') { const range = window(effectiveDate,30); payload = {user_id:id,start_date:range.begin_date,end_date:range.end_date}; }
   }
   return {path:PATHS[type],method:'POST',payload};
 }
@@ -64,7 +72,6 @@ export function validateData(type: string, d: any, task: any = {}): any {
   else if (type === 'topic_search') valid = arrays('topic_list');
   else if (type === 'videos') valid = Array.isArray(d) || arrays('data');
   else if (type === 'topic_relation') valid = arrays('item_list','digg_author_list','comment_author_list');
-  else if (type === 'author_dates') valid = /^\d{8}$/.test(d?.datetime);
   else if (type === 'author_search') valid = arrays('userlist');
   else if (type === 'author_info') valid = typeof d?.user_id === 'string' && d.user_id === task.id && 'fans_count' in d;
   else if (type === 'author_core') valid = arrays('fanslistday','likelistday') && d.fans_info && d.like_info;

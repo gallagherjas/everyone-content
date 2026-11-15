@@ -11,7 +11,7 @@ const root = mkdtempSync(join(tmpdir(), 'everyone-login-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 const session = { name: 'sessionid', value: 'synthetic-test-session', domain: '.douyin.com', path: '/', expires: -1 };
 function database() { const db = new DatabaseSync(':memory:'); migrate(db, ':memory:'); createAccount(db, '登录测试账号'); return db; }
-function windowWith(cookies: () => Promise<any[]>, userAgent = async () => 'Test Agent') {
+function windowWith(cookies: () => Promise<any[]>, userAgent = 'Test Agent') {
   let closed = false;
   return { cookies, userAgent, isClosed: () => closed, close: async () => { closed = true; } };
 }
@@ -71,7 +71,8 @@ test('B站使用官方登录页，并只读取可发送给创作中心总览的�
     });
     manager.start(db, 1, 'bili'); await manager.settle('bili', 1);
     assert.equal(manager.state(db, 1, 'bili').status, 'configured');
-    assert.equal(db.prepare("SELECT COUNT(*) n FROM collection_credentials WHERE provider='bili'").get()!.n, 1);
+    const path = String(db.prepare("SELECT auth_path FROM collection_credentials WHERE account_id=1 AND provider='bili'").get()!.auth_path);
+    assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), { cookie: 'SESSDATA=synthetic-bili-session', userAgent: 'Test Agent' });
     assert.equal(db.prepare('SELECT COUNT(*) n FROM collection_requests').get()!.n, 0);
   } finally { db.close(); }
 });
@@ -92,17 +93,23 @@ test('同一账号重复点击只启动一次，其他账号不能串用登录�
 test('取消发生在读取会话期间时不保存；失败消息不泄露上游文本', async () => {
   const db = database();
   try {
-    let release: (value: string) => void = () => {}, saves = 0;
-    const window = windowWith(async () => [session], () => new Promise(resolve => release = resolve));
+    let release: (value: typeof session[]) => void = () => {}, saves = 0;
+    const window = windowWith(() => new Promise(resolve => release = resolve));
     const manager = new PlatformLoginManager({ launch: async () => window, save: () => { saves++; } });
     manager.start(db, 1, 'index'); await new Promise(resolve => setImmediate(resolve));
-    await manager.cancel(db, 1, 'index'); release('Test Agent'); await manager.settle('index', 1);
+    await manager.cancel(db, 1, 'index'); release([session]); await manager.settle('index', 1);
     assert.equal(saves, 0); assert.equal(manager.state(db, 1, 'index').status, 'cancelled');
     db.prepare("INSERT INTO collection_provider_state(provider,scope,paused,error) VALUES('index','account:1',1,'login_required')").run();
     const failing = new PlatformLoginManager({ launch: async () => { throw new Error('private upstream text'); } });
     failing.start(db, 1, 'index'); await failing.settle('index', 1);
-    assert.equal(failing.state(db, 1, 'index').status, 'failed');
-    assert.ok(!JSON.stringify(failing.state(db, 1, 'index')).includes('private upstream'));
+    const state = failing.state(db, 1, 'index');
+    assert.equal(state.status, 'failed');
+    assert.equal(state.message, '无法完成登录，请重新连接。');
+    const unreadable = new PlatformLoginManager({ launch: async () => windowWith(async () => { throw new Error('private upstream text'); }) });
+    unreadable.start(db, 1, 'bili'); await unreadable.settle('bili', 1);
+    const unreadableState = unreadable.state(db, 1, 'bili');
+    assert.equal(unreadableState.status, 'session_read_failed');
+    assert.equal(unreadableState.message, '无法读取登录状态，请重新扫码连接。');
   } finally { db.close(); }
 });
 test('登录等待超时及归档账号不会登记凭据', async () => {

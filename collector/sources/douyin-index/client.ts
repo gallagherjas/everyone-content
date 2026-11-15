@@ -33,7 +33,7 @@ export class ReadClient {
   }
   async read(task: any, req: { path: string; method: string; payload: any }) {
     if (!Object.values(PATHS).includes(req.path) || !Object.hasOwn(PATHS,task.type) || PATHS[task.type as string] !== req.path) throw new Error('endpoint_not_allowed');
-    const method = ['topic_dates','author_dates'].includes(task.type)?'GET':'POST';
+    const method = task.type==='topic_dates'?'GET':'POST';
     if (req.method !== method) throw new Error('method_not_allowed');
     if (this.busy) throw new Error('serial_requests_required');
     this.busy=true;
