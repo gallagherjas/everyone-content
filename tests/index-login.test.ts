@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, rmSync, readFileSync, statSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { migrate } from '../db/migrate.ts';
 import { createAccount } from '../lib/accounts.ts';
 import { PlatformLoginManager, saveSession } from '../lib/platform-login.ts';
@@ -15,23 +15,27 @@ function windowWith(cookies: () => Promise<any[]>, userAgent = 'Test Agent') {
   let closed = false;
   return { cookies, userAgent, isClosed: () => closed, close: async () => { closed = true; } };
 }
-const saveInto = (db: DatabaseSync) => (provider: string, id: number, cookies: any[], agent?: string) => saveSession(db, provider, id, cookies, agent, root);
+const saveInto = (db: DatabaseSync) => (provider: string, id: number, cookies: any[], agent?: string, accountName?: string) =>
+  saveSession(db, provider, id, cookies, agent, root, accountName);
 
 test('匿名和其他域会话不保存，登录后凭据按账号私密落盘，不回显或自动采集', async () => {
   const db = database();
   try {
     let step = 0;
     const window = windowWith(async () => step++ === 0 ? [{ ...session, domain: 'unrelated.test' }] : [session, { ...session, name: 'other', domain: 'unrelated.test' }]);
-    const manager = new PlatformLoginManager({ launch: async () => window, sleep: async () => {}, save: saveInto(db) });
+    const manager = new PlatformLoginManager({ launch: async () => ({ ...window, accountName: async () => '创作者（douyin_test）' }),
+      sleep: async () => {}, save: saveInto(db) });
     manager.start(db, 1, 'index'); await manager.settle('index', 1);
     const state = manager.state(db, 1, 'index');
     assert.equal(state.status, 'configured'); assert.equal(state.configured, true);
+    assert.equal(state.account_name, '创作者（douyin_test）');
+    assert.deepEqual(state.session_accounts, ['登录测试账号']);
     assert.ok(!JSON.stringify(state).includes(session.value));
     const path = String(db.prepare("SELECT auth_path FROM collection_credentials WHERE account_id=1 AND provider='index'").get()!.auth_path);
     // Windows不支持POSIX权限位，与loadSession的权限检查保持一致。
     if (process.platform !== 'win32') {
       assert.equal(statSync(path).mode & 0o777, 0o600);
-      assert.equal(statSync(join(root, 'authorization', '1')).mode & 0o777, 0o700);
+      assert.equal(statSync(dirname(path)).mode & 0o777, 0o700);
     }
     const saved = JSON.parse(readFileSync(path, 'utf8'));
     assert.equal(saved.cookie, 'sessionid=synthetic-test-session');

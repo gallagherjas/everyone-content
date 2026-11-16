@@ -4,18 +4,20 @@ import { Badge, ConfirmBtn, Msg, Toggle, type BadgeTone } from "../components/Co
 import { Page } from "../components/Layout";
 import PlatformAuthorization from "../components/PlatformAuthorization";
 import CollectionSchedule, { type Budget } from "../components/CollectionSchedule";
-import CollectionControls from "../components/CollectionControls";
+import CollectionControls, { CollectionRunResult, SourceBlocker, useManualCollection } from "../components/CollectionControls";
 import CollectionQueue from "../components/CollectionQueue";
 import type { CollectionTaskStatus } from "../../../collector/core/status";
+import type { BloggerSearchStatus } from "../../../collector/core/bloggers";
+import type { CollectionProvider } from "../../../lib/collection-schedule";
 import ExcludeKeywords from "../components/ExcludeKeywords";
-import { names, operations, reason, statuses } from "../labels";
+import { names, operations, reason, searchLabels, searchMessage, statuses } from "../labels";
 import { useCachedLoad, useInvalidatePages, usePageVisible, KeepAlive } from "../components/PageCache";
 import Pager, { usePaged } from "../components/Pager";
 
-interface Run { id: number; provider: string; operation: string; target: string; status: string; observed_at: string; version: string | null; error: string | null }
-interface State { tasks: CollectionTaskStatus[]; runs: Run[]; budgets: Budget[]; credentials: Record<string, boolean>; queue: { total: number; due: number }; discovery: { keywords: string[] } | null }
+interface Run { id: number; provider: CollectionProvider; operation: string; target: string; status: string; observed_at: string; version: string | null; error: string | null }
+interface State { tasks: CollectionTaskStatus[]; runs: Run[]; budgets: Budget[]; credentials: Record<string, boolean>; blockers: Record<CollectionProvider, string | null>; queue: { total: number; due: number }; discovery: { keywords: string[] } | null }
 interface Source { id: number; name: string }
-interface BloggerRow { id: number; kind: "blogger" | "blogger_search"; name: string; status: string; userId?: string; resolving?: boolean; options?: { core?: boolean; info?: boolean }; lastCollectAt?: string | null }
+interface BloggerRow extends Partial<BloggerSearchStatus> { id: number; kind: "blogger" | "blogger_search"; name: string; status: string; userId?: string; options?: { core?: boolean; info?: boolean }; lastCollectAt?: string | null }
 
 const RUN_TONE: Record<string, BadgeTone> = { ok: "up", failed: "danger", running: "warn", cached: "gray", deferred: "warn" };
 /** 单个来源的今日额度卡：用量/上限 + 细进度条；未连接的来源弱化展示 */
@@ -30,6 +32,7 @@ function BudgetCard({ label, used, limit, connected }: { label: string; used: nu
 export default function CollectPage({ current, onUpdate, jumpTo }: { current: Account; onUpdate: (account: Account) => void; jumpTo?: { section: string } | null }) {
   const api = useApi(), archived = current.status === "archived";
   const visible = usePageVisible(), invalidate = useInvalidatePages();
+  const manualRun = useManualCollection();
   const [section, setSection] = useState("overview");
   // 提醒中的操作可以直接打开连接或日志。
   useEffect(() => { if (jumpTo?.section) setSection(jumpTo.section); }, [jumpTo]);
@@ -52,7 +55,7 @@ export default function CollectPage({ current, onUpdate, jumpTo }: { current: Ac
   useCachedLoad('bloggers', loadBloggers);
   // 昵称解析与博主首轮采集是异步任务：有进行中的登记时轮询刷新列表。
   useEffect(() => {
-    if (!visible || !bloggers.some(b => b.resolving)) return;
+    if (!visible || !bloggers.some(b => b.kind === "blogger_search" && b.status === "ready")) return;
     const timer = setTimeout(loadBloggers, 3000);
     return () => clearTimeout(timer);
   }, [visible, bloggers, loadBloggers]);
@@ -73,6 +76,12 @@ export default function CollectPage({ current, onUpdate, jumpTo }: { current: Ac
   };
   const runPage = usePaged(state?.runs ?? []);
   const tracked = bloggers.filter(b => b.kind === "blogger"), pending = bloggers.filter(b => b.kind === "blogger_search");
+  const indexBlocker = state?.blockers?.index;
+  const onConnect = () => { setMessage(""); setSection("auth"); };
+  const onResume = (provider: CollectionProvider) => void action(
+    () => api("/api/collection/resume", { method: "POST", body: JSON.stringify({ provider }) }), "已恢复采集。");
+  const removeBlogger = (id: number) => void action(
+    () => api(`/api/bloggers/${id}`, { method: "DELETE" }), "已移出。");
 
   return <Page head="采集" active={section} onPick={key => { setSection(key); setMessage(""); setRunDetail(null); }} items={[
     { key: "overview", label: "总览" },
@@ -91,8 +100,9 @@ export default function CollectPage({ current, onUpdate, jumpTo }: { current: Ac
           {[...(state?.budgets ?? [])].sort((a, b) => (a.provider === 'index' ? 0 : 1) - (b.provider === 'index' ? 0 : 1))
             .map(b => <BudgetCard key={b.provider} label={names[b.provider] ?? b.provider} used={b.used} limit={b.daily_limit} connected={!!state?.credentials?.[b.provider]} />)}
         </div>
-        <CollectionControls archived={archived} credentials={state?.credentials}
-          hasKeywords={!!state?.discovery?.keywords.length} hasBloggers={bloggers.some(row => row.status === "ready")} />
+        <CollectionControls archived={archived} credentials={state?.credentials} blockers={state?.blockers}
+          hasKeywords={!!state?.discovery?.keywords.length} hasBloggers={bloggers.some(row => row.status === "ready")}
+          run={manualRun} onConnect={onConnect} onResume={onResume} />
       </section>
       <section className="panel">
         <h2 className="font-semibold text-xl">采集规则</h2>
@@ -133,10 +143,24 @@ export default function CollectPage({ current, onUpdate, jumpTo }: { current: Ac
         <p className="mt-2 text-sm text-muted">输入抖音昵称经指数搜索定位后开始追踪；作品榜固定 1 次/天，日增曲线与资料页按开关追加。数据浏览见「博主」页。</p>
         <div className="mt-3 flex gap-2">
           <input className="field min-w-0 flex-1" value={bloggerName} onChange={e => setBloggerName(e.target.value)} placeholder="例如：AI 造物笔记" aria-label="博主昵称" maxLength={80} disabled={archived} />
-          <button className="btn-primary shrink-0" disabled={busy || !bloggerName.trim()}
-            onClick={() => void action(async () => { await api("/api/bloggers", { method: "POST", body: JSON.stringify({ keyword: bloggerName }) }); setBloggerName(""); loadBloggers(); }, "已登记昵称，解析完成后出现在列表。")}>添加</button>
+          <button className="btn-primary shrink-0" disabled={archived || busy || indexBlocker !== null || !bloggerName.trim()}
+            onClick={() => void action(async () => { await api("/api/bloggers", { method: "POST", body: JSON.stringify({ keyword: bloggerName }) }); setBloggerName(""); }, "已登记昵称，等待解析。")}>添加</button>
         </div>
-        {pending.length > 0 && <p className="mt-3 text-sm text-muted">待解析：{pending.map(p => `${p.name}${p.status === "paused" ? "（未找到）" : ""}`).join("、")}</p>}
+        {indexBlocker && <div className="mt-3"><SourceBlocker error={indexBlocker} disabled={archived || busy || !!manualRun.active}
+          onConnect={onConnect} onResume={() => onResume('index')} /></div>}
+        {pending.length > 0 && <div className="mt-3 space-y-2">
+          {pending.map(p => {
+            const detail = p.searchState !== "blocked" && searchMessage(p);
+            return <div key={p.id} className="rounded-lg border border-line/70 bg-canvas/50 px-3 py-2.5">
+              <div className="flex items-center gap-3 text-sm">
+                <span className="flex-1 font-medium">{p.name}</span>
+                <span className="text-xs text-muted">{searchLabels[p.searchState ?? "queued"]}</span>
+                <ConfirmBtn label="移出" confirmLabel="确认移出" disabled={archived || busy} onConfirm={() => removeBlogger(p.id)} />
+              </div>
+              {detail && <p className="text-xs text-muted">{detail}</p>}
+            </div>;
+          })}
+        </div>}
         {!!tracked.length && <div className="mt-4 space-y-2">
           {tracked.map(b => <div key={b.id} className="rounded-lg border border-line/70 bg-canvas/50 px-3 py-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -145,7 +169,7 @@ export default function CollectPage({ current, onUpdate, jumpTo }: { current: Ac
                 <span>{1 + (b.options?.core ? 1 : 0) + (b.options?.info ? 1 : 0)} 次/天</span>
                 <span>{b.lastCollectAt ? `最近采集 ${fmtTime(b.lastCollectAt)}` : "尚未采集"}</span>
                 <ConfirmBtn label="移出" confirmLabel="确认移出" disabled={busy}
-                  onConfirm={() => void action(async () => { await api(`/api/bloggers/${b.id}`, { method: "DELETE" }); loadBloggers(); }, "已移出。")} />
+                  onConfirm={() => removeBlogger(b.id)} />
               </span>
             </div>
             <div className="mt-2 flex flex-wrap gap-x-6 gap-y-2 border-t border-line pt-2.5">
@@ -186,9 +210,18 @@ export default function CollectPage({ current, onUpdate, jumpTo }: { current: Ac
                   .then(data => setRunDetail({ id: r.id, text: JSON.stringify({ ...data, observed_at: fmtTime(data.observed_at) }, null, 2) }))
                   .catch(err => { setFailure(true); setMessage(String(err)); });
               }}>{runDetail?.id === r.id ? '收起记录' : '查看记录'}</a>}
+              {r.status === "failed" && <button type="button"
+                className="link ml-1 shrink-0 enabled:cursor-pointer disabled:cursor-not-allowed disabled:text-faint disabled:no-underline"
+                disabled={archived || !!manualRun.active || state?.blockers?.[r.provider] !== null}
+                title={reason(state?.blockers?.[r.provider] ?? null) ?? undefined}
+                aria-label={`重试${operations[r.operation] ?? r.operation}记录 ${r.id}`}
+                onClick={() => void manualRun.start(r.id)}>
+                {manualRun.active?.target === r.id ? `重试中 ${manualRun.active.percent}%` : "重试"}
+              </button>}
             </span>
           </div>
           {r.error && <p className={`mt-1 break-words text-xs leading-5 ${r.status === "failed" ? "text-danger" : "text-muted"}`} title={r.error}>{reason(r.error)}</p>}
+          <CollectionRunResult result={manualRun.result} target={r.id} />
           {runDetail?.id === r.id && <div className="codebox mt-2 max-h-96">{runDetail.text}</div>}
         </div>)}</div>
         {!state?.runs.length && <p className="py-4 text-sm text-muted">尚无采集记录；手动采集后生成。</p>}

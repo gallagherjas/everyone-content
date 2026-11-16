@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test, after } from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
@@ -132,6 +132,18 @@ test('账号隔离、画像生效与指数配置可通过本地API完成', async
     assert.equal(collection.discovery, null);
     assert.deepEqual(collection.budgets.map((row: any) => row.provider), ['bili', 'douyin', 'index', 'xhs']);
     await request('/api/run/collect', second.id, 'POST', { only: 'unsupported' }, 400);
+    for (const only of ['topic_rank', 'video_rank', 'author', 'index', 'topic', 'douyin', 'xhs', 'bili', undefined])
+      await request('/api/run/collect', second.id, 'POST', { only }, 409);
+    assert.match((await request('/api/bloggers', second.id, 'POST', { keyword: '待追踪博主' }, 409)).error, /连接.*抖音指数/);
+    assert.deepEqual(await request('/api/bloggers', second.id), []);
+    const unavailable = new DatabaseSync(filename);
+    try {
+      unavailable.prepare('INSERT INTO collection_credentials VALUES(?,?,?,?)')
+        .run(second.id, 'xhs', join(dir, 'missing-xhs.json'), `account:${second.id}`);
+    } finally { unavailable.close(); }
+    assert.equal((await request('/api/auth/xhs', second.id)).status, 'expired');
+    await request('/api/run/collect', second.id, 'POST', { only: 'xhs' }, 409);
+    await request('/api/collection/records/1/retry', second.id, 'POST', undefined, 404);
     await request('/api/collection/progress?run_id=1', second.id, 'GET', undefined, 404);
     await request('/api/collection/limits', second.id, 'PUT', { provider: 'unsupported', daily_limit: 1 }, 400);
     const invalid = { ...second.config.schedules, unsupported: { enabled: true, times: ['10:00'], request_limit: 1 } };
@@ -141,11 +153,44 @@ test('账号隔离、画像生效与指数配置可通过本地API完成', async
       assert.equal(db.prepare('SELECT COUNT(*) n FROM task_runs').get()!.n, 0);
       assert.equal(db.prepare('SELECT COUNT(*) n FROM collection_requests').get()!.n, 0);
     } finally { db.close(); }
+    await request('/api/auth/index/reuse', second.id, 'POST', { source_account_id: first.id }, 409);
+    const authDir = join(process.env.EVERYONE_CONTENT_DATA_DIR!, 'authorization', String(first.id));
+    const original = join(authDir, 'index.json');
+    mkdirSync(authDir, { recursive: true, mode: 0o700 });
+    writeFileSync(original, JSON.stringify({ cookie: 'synthetic-index-session', accountName: '指数测试帐号' }), { mode: 0o600 });
+    const bindings = new DatabaseSync(filename);
+    let sharedFile: string;
+    try {
+      bindings.prepare('INSERT INTO collection_credentials VALUES(?,?,?,?)')
+        .run(first.id, 'index', original, `account:${first.id}`);
+      const choices = (await request('/api/auth/index', second.id)).reuse_accounts;
+      assert.deepEqual(choices, [{ id: first.id, name: first.name, account_name: '指数测试帐号' }]);
+      assert.match((await request('/api/auth/index/reuse', second.id, 'POST', { source_account_id: second.id }, 400)).error, /其他帐号/);
+      const state = await request('/api/auth/index/reuse', second.id, 'POST', { source_account_id: first.id });
+      assert.deepEqual(state.session_accounts, [first.name, second.name]);
+      assert.equal(state.account_name, '指数测试帐号');
+      assert.equal(state.reuse_accounts.length, 0);
+      assert.ok(!JSON.stringify(state).includes('synthetic-index-session'));
+      const linked = bindings.prepare("SELECT scope,auth_path FROM collection_credentials WHERE provider='index' ORDER BY account_id").all();
+      sharedFile = String(linked[0].auth_path);
+      assert.deepEqual(linked.map(row => row.scope), [`account:${first.id}`, `account:${second.id}`]);
+      assert.equal(linked[1].auth_path, sharedFile);
+      assert.notEqual(sharedFile, original);
+      assert.equal(existsSync(original), false);
+      assert.equal(bindings.prepare('SELECT COUNT(*) n FROM task_runs').get()!.n, 0);
+    } finally { bindings.close(); }
+    await request(`/api/accounts/${first.id}`, first.id, 'DELETE');
+    assert.ok(existsSync(sharedFile));
+    assert.equal((await request('/api/auth/index', second.id)).status, 'configured');
     await request(`/api/accounts/${second.id}`, second.id, 'PUT', { status: 'archived' });
     await request('/api/keywords', second.id, 'POST', { keyword: '归档后不得写入' }, 409);
     await request('/api/auth/index/cancel', second.id, 'POST');
     await request('/api/auth/index/start', second.id, 'POST', undefined, 409);
+    await request(`/api/accounts/${second.id}`, second.id, 'DELETE');
+    assert.equal(existsSync(sharedFile), false);
   } finally {
-    const exited = once(child, 'exit'); child.kill(); await exited;
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = once(child, 'exit'); child.kill(); await exited;
+    }
   }
 });

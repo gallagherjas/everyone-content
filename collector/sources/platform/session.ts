@@ -1,4 +1,6 @@
-import { readFileSync, statSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 // 平台登录会话:cookie 串 + 可选 UA。与抖音指数会话同构,文件同样要求 0600。
 export interface PlatformAuth { cookie: string; userAgent?: string }
@@ -27,4 +29,15 @@ export function loadSession(file: string | undefined, env: Record<string, string
   if (typeof auth?.cookie !== 'string' || !auth.cookie.trim() || /[\r\n]/.test(auth.cookie)) throw new Error('invalid_auth_cookie');
   if (auth.userAgent !== undefined && (typeof auth.userAgent !== 'string' || /[\r\n]/.test(auth.userAgent))) throw new Error('invalid_user_agent');
   return auth;
+}
+
+export function writePrivateAuth(file: string, auth: PlatformAuth) {
+  const folder = dirname(file), temp = join(folder, randomUUID() + '.tmp');
+  mkdirSync(folder, { recursive: true, mode: 0o700 });
+  chmodSync(folder, 0o700);
+  try {
+    writeFileSync(temp, JSON.stringify(auth), { mode: 0o600, flag: 'wx' });
+    loadSession(temp);
+    renameSync(temp, file);
+  } finally { rmSync(temp, { force: true }); }
 }

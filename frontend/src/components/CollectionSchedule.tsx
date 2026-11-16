@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useApi, type Account } from '../api';
-import { INDEX_SCOPES, PLATFORM_PROVIDERS, providerForSchedule, type CollectionProvider, type CollectionSchedule as Schedule, type ScheduleScope } from '../../../lib/collection-schedule';
+import { INDEX_SCOPES, PLATFORM_PROVIDERS, providerForScope, type CollectionProvider, type CollectionSchedule as Schedule, type ScheduleScope } from '../../../lib/collection-schedule';
 import { collectionNames, names } from '../labels';
 import { CollectionRow } from './CollectionControls';
 import { Msg, Toggle } from './Common';
@@ -104,7 +104,7 @@ export default function CollectionSchedule({ account, onSaved, budgets, credenti
   };
   const scheduleRow = (scope: ScheduleScope) => {
     const label = scope === 'index' ? '原抖音指数合并' : collectionNames[scope];
-    const provider = providerForSchedule(scope), schedule = draft[scope] ?? saved[scope];
+    const provider = providerForScope(scope), schedule = draft[scope] ?? saved[scope];
     const connected = !!credentials?.[provider];
     return <CollectionRow key={scope} label={<>{label}{credentials && !connected && <span className="ml-2 text-xs font-normal text-muted">未连接</span>}</>}>
       <Toggle label={<><span className="sr-only">{label}</span>定时</>} checked={schedule.enabled}

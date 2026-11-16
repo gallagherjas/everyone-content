@@ -7,6 +7,7 @@ const BILI_ORIGIN = 'https://member.bilibili.com';
 export const BILI_CREATOR_HOME = BILI_ORIGIN + '/platform/home';
 const BILI_STATS_PATH = '/x/web/data/index/stat?tmid=-1';
 export const BILI_SESSION_URL = BILI_ORIGIN + BILI_STATS_PATH;
+const DOUYIN_PROFILE_PATH = '/aweme/v1/creator/user/info/';
 
 interface PlatformSnapshot {
   origin: string;
@@ -22,7 +23,7 @@ export const SNAPSHOT_PLATFORMS: Record<string, PlatformSnapshot> = {
   douyin: {
     origin: 'https://creator.douyin.com',
     referer: 'https://creator.douyin.com/',
-    path: '/aweme/v1/creator/user/info/',
+    path: DOUYIN_PROFILE_PATH,
     uid: [],
     fans: ['douyin_user_verify_info.follower_count', 'user_profile.follower_count'],
     likes: ['douyin_user_verify_info.total_favorited', 'user_profile.total_favorited'],
@@ -50,6 +51,15 @@ export const SNAPSHOT_PLATFORMS: Record<string, PlatformSnapshot> = {
     views: ['data.total_click'],
   },
 };
+export const DOUYIN_PROFILE_URL = SNAPSHOT_PLATFORMS.douyin.origin + DOUYIN_PROFILE_PATH;
+
+export function douyinAccountName(body: any): string | undefined {
+  if (body?.status_code !== 0) return undefined;
+  const value = (...names: unknown[]) => names.find(name => typeof name === 'string' && name.trim()) as string | undefined;
+  const nickname = value(body.user_profile?.nick_name, body.douyin_user_verify_info?.nick_name)?.trim();
+  const handle = value(body.user_profile?.unique_id, body.douyin_user_verify_info?.douyin_unique_id)?.trim();
+  return nickname && handle ? `${nickname}（${handle}）` : nickname || handle;
+}
 
 export interface Snapshot { uid: string; metrics: { fans: number | null; likes: number | null; works: number | null; views: number | null } }
 
@@ -109,11 +119,7 @@ export async function fetchSnapshot(provider: string, auth: PlatformAuth, client
 
 // runner 的 execute 分发入口:凭证读取 → 当日去重 → 单请求快照。
 export async function snapshotExecute(store: CollectionStore, run: any, client: typeof fetch, clock: () => number): Promise<any> {
-  const credential = store.db.prepare(
-    `SELECT c.auth_path,t.last_success_at FROM collection_credentials c
-    JOIN collection_task_accounts a ON a.account_id=c.account_id JOIN collection_tasks t ON t.key=a.task_key
-    WHERE a.task_key=? AND c.provider=? LIMIT 1`,
-  ).get(run.task_key, run.provider) as any;
+  const credential = store.credentialForRun(run.id);
   const auth = loadSession(credential?.auth_path);
   const previous = store.latest(run.task_key);
   if (credential?.last_success_at != null && previous?.version === collectionDay(run.at_ms))

@@ -1,9 +1,8 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { existsSync, mkdirSync, chmodSync, writeFileSync, renameSync, rmSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
 import { activeAccount, InputError } from './accounts.ts';
 import { openDb } from './db.ts';
 import { DATA } from './strategies.ts';
@@ -12,12 +11,13 @@ import { CollectionStore } from '../collector/core/store.ts';
 import { registerAuth } from '../collector/core/settings.ts';
 import { authFromCookies } from '../collector/sources/douyin-index/client.ts';
 import { ORIGIN } from '../collector/sources/douyin-index/protocol.ts';
-import { sessionFromCookies, loadSession, type PlatformAuth } from '../collector/sources/platform/session.ts';
-import { BILI_CREATOR_HOME, BILI_SESSION_URL } from '../collector/sources/platform/snapshot.ts';
+import { sessionFromCookies, writePrivateAuth, type PlatformAuth } from '../collector/sources/platform/session.ts';
+import { BILI_CREATOR_HOME, BILI_SESSION_URL, DOUYIN_PROFILE_URL, douyinAccountName } from '../collector/sources/platform/snapshot.ts';
+import { connectionStatus } from '../collector/core/availability.ts';
+import { COLLECTION_PROVIDER_NAMES } from './collection-schedule.ts';
+import { identifyIndexAccount, indexSessionDetails, reuseIndexSession, saveIndexSession } from './index-sessions.ts';
 
 const running = (status: string) => status === 'preparing' || status === 'waiting';
-// 登录失效的统一口径：暂停原因命中这些受控错误码即视为会话失效，登录状态展示与工作台提醒共用。
-export const AUTH_ERROR = /login_required|auth_required|invalid_auth|invalid_user_agent|auth_file/;
 const messages: Record<string, string> = {
   missing: '尚未连接。', preparing: '正在准备专用登录窗口，首次使用可能需要下载浏览器。',
   waiting: '请在打开的窗口完成登录并按页面提示验证，会话会自动保存在本机。',
@@ -36,7 +36,7 @@ const messages: Record<string, string> = {
 export interface LoginPlatform { label: string; loginUrl: string; cookieUrl?: string; file: string; pick: (cookies: any[], userAgent?: string) => PlatformAuth }
 export const LOGIN_PLATFORMS: Record<string, LoginPlatform> = {
   index: {
-    label: '抖音指数',
+    label: COLLECTION_PROVIDER_NAMES.index,
     loginUrl: ORIGIN + '/creator-micro/creator-count/arithmetic-index',
     file: 'index.json',
     pick: (cookies, userAgent) => {
@@ -46,21 +46,21 @@ export const LOGIN_PLATFORMS: Record<string, LoginPlatform> = {
     },
   },
   douyin: {
-    label: '抖音创作后台',
+    label: COLLECTION_PROVIDER_NAMES.douyin,
     loginUrl: 'https://creator.douyin.com/',
     file: 'douyin.json',
     pick: (cookies, userAgent) => sessionFromCookies(cookies, ['creator.douyin.com', '.douyin.com', 'douyin.com'],
       /(?:^|; )(?:sessionid(?:_ss)?|sid_guard|sid_tt)=[^;]+/, userAgent),
   },
   xhs: {
-    label: '小红书创作服务',
+    label: COLLECTION_PROVIDER_NAMES.xhs,
     loginUrl: 'https://creator.xiaohongshu.com/',
     file: 'xhs.json',
     pick: (cookies, userAgent) => sessionFromCookies(cookies, ['creator.xiaohongshu.com', '.xiaohongshu.com', 'xiaohongshu.com'],
       /(?:^|; )web_session=[^;]+/, userAgent),
   },
   bili: {
-    label: 'B站创作中心',
+    label: COLLECTION_PROVIDER_NAMES.bili,
     loginUrl: `https://passport.bilibili.com/login?gourl=${encodeURIComponent(BILI_CREATOR_HOME)}`,
     cookieUrl: BILI_SESSION_URL,
     file: 'bili.json',
@@ -72,6 +72,7 @@ export const LOGIN_PLATFORMS: Record<string, LoginPlatform> = {
 interface Cookie { name: string; value: string; domain: string; path: string; expires: number }
 interface LoginWindow {
   cookies(): Promise<Cookie[]>;
+  accountName?(): Promise<string | undefined>;
   userAgent: string;
   isClosed(): boolean;
   close(): Promise<void>;
@@ -107,56 +108,49 @@ async function openLoginWindow(signal: AbortSignal, loginUrl: string, cookieUrl?
       .catch(() => { throw new Error(page.isClosed() ? 'window_closed' : 'login_page_unavailable'); });
     return {
       cookies: () => context.cookies(cookieUrl), userAgent,
+      ...(loginUrl === LOGIN_PLATFORMS.index.loginUrl && { accountName: async () => {
+        const response = await context.request.get(DOUYIN_PROFILE_URL, {
+          maxRedirects: 0, timeout: 5000, headers: { referer: ORIGIN + '/' },
+        });
+        try { return response.ok() ? douyinAccountName(await response.json()) : undefined; }
+        finally { await response.dispose(); }
+      } }),
       isClosed: () => page.isClosed() || !browser.isConnected(), close: () => browser.close(),
     };
   } catch (error) { await browser.close().catch(() => {}); throw error; }
 }
 
 // 会话落盘:哨兵校验 → 0600 临时文件 → 原子改名 → 登记凭据。directory 可注入供测试隔离。
-export function saveSession(db: DatabaseSync, provider: string, id: number, cookies: Cookie[], userAgent?: string, directory: string = DATA) {
+export function saveSession(db: DatabaseSync, provider: string, id: number, cookies: Cookie[], userAgent?: string, directory: string = DATA, accountName?: string) {
   activeAccount(db, id);
   const platform = LOGIN_PLATFORMS[provider];
   const auth = platform.pick(cookies, userAgent);
-  const folder = join(directory, 'authorization', String(id));
-  mkdirSync(folder, { recursive: true, mode: 0o700 }); chmodSync(folder, 0o700);
-  const file = join(folder, platform.file), temp = join(folder, randomUUID() + '.tmp');
-  try {
-    writeFileSync(temp, JSON.stringify(auth), { mode: 0o600, flag: 'wx' });
-    loadSession(temp);
-    renameSync(temp, file);
-    registerAuth(new CollectionStore(db, directory), id, file, provider);
-  } finally { rmSync(temp, { force: true }); }
+  if (provider === 'index') return saveIndexSession(db, id, { ...auth, accountName }, directory);
+  const file = join(directory, 'authorization', String(id), platform.file);
+  writePrivateAuth(file, auth);
+  registerAuth(new CollectionStore(db, directory), id, file, provider);
 }
-function persistSession(provider: string, id: number, cookies: Cookie[], userAgent?: string) {
+function persistSession(provider: string, id: number, cookies: Cookie[], userAgent?: string, accountName?: string) {
   let unlock: () => void;
   try { unlock = lock('collection'); } catch { throw new Error('collection_busy'); }
   try {
     const db = openDb();
-    try { saveSession(db, provider, id, cookies, userAgent); } finally { db.close(); }
+    try { saveSession(db, provider, id, cookies, userAgent, DATA, accountName); } finally { db.close(); }
   } finally { unlock(); }
-}
-
-export function connectionStatus(db: DatabaseSync, id: number, provider: string) {
-  const row = db.prepare(`SELECT p.error, p.paused, EXISTS(
-    SELECT 1 FROM collection_tasks t WHERE t.provider=c.provider AND t.scope=c.scope AND t.last_success_at IS NOT NULL
-  ) verified FROM collection_credentials c LEFT JOIN collection_provider_state p ON p.provider=c.provider AND p.scope=c.scope
-  WHERE c.account_id=? AND c.provider=?`).get(id, provider);
-  const expired = AUTH_ERROR.test(String(row?.error ?? ''));
-  return {
-    status: !row ? 'missing' : expired ? 'expired' : row.verified ? 'verified' : 'configured',
-    configured: !!row, paused: !!row?.paused, error: typeof row?.error === 'string' ? row.error : null,
-  };
 }
 
 export class PlatformLoginManager {
   private jobs = new Map<string, Job>();
+  private reusingIndex?: number;
   private launch: typeof openLoginWindow;
-  private save: (provider: string, accountId: number, cookies: Cookie[], userAgent?: string) => void;
+  private save: typeof persistSession;
   private clock: () => number;
   private sleep: () => Promise<void>;
-  constructor(options: { launch?: typeof openLoginWindow; save?: typeof persistSession; clock?: () => number; sleep?: () => Promise<void> } = {}) {
+  private onConnected?: () => void;
+  constructor(options: { launch?: typeof openLoginWindow; save?: typeof persistSession; clock?: () => number; sleep?: () => Promise<void>; onConnected?: () => void } = {}) {
     this.launch = options.launch ?? openLoginWindow; this.save = options.save ?? persistSession;
     this.clock = options.clock ?? Date.now; this.sleep = options.sleep ?? (() => new Promise(resolve => setTimeout(resolve, 1000)));
+    this.onConnected = options.onConnected;
   }
   state(db: DatabaseSync, id: number, provider: string) {
     const platform = LOGIN_PLATFORMS[provider];
@@ -166,11 +160,26 @@ export class PlatformLoginManager {
     const attempt = job && job.status !== 'configured' ? job.status : null;
     const status = attempt && (running(attempt) || !connection.configured) ? attempt : connection.status;
     return { provider, label: platform.label, status, configured: connection.configured, message: messages[status],
-      attempt_message: attempt && attempt !== status ? messages[attempt] : null };
+      attempt_message: attempt && attempt !== status ? messages[attempt] : null,
+      ...(provider === 'index' ? indexSessionDetails(db, id) : {}) };
+  }
+  async reuseIndex(db: DatabaseSync, id: number, sourceId: number) {
+    const key = `index:${id}`;
+    if (running(this.jobs.get(key)?.status ?? '')) throw new InputError('请先完成或取消当前扫码登录。', 409);
+    let unlock: () => void;
+    try { unlock = lock('collection'); }
+    catch { throw new InputError('采集正在运行，请等本轮结束后复用会话。', 409); }
+    this.reusingIndex = id;
+    try { await reuseIndexSession(db, id, sourceId, DATA, identifyIndexAccount); }
+    finally { this.reusingIndex = undefined; unlock(); }
+    this.jobs.delete(key);
+    this.onConnected?.();
+    return this.state(db, id, 'index');
   }
   start(db: DatabaseSync, id: number, provider: string) {
     if (!LOGIN_PLATFORMS[provider]) throw new InputError('未知平台', 404);
     activeAccount(db, id);
+    if (provider === 'index' && this.reusingIndex === id) throw new InputError('正在复用抖音指数会话，请稍后。', 409);
     const key = `${provider}:${id}`;
     const current = this.jobs.get(key);
     if (current && running(current.status)) return this.state(db, id, provider);
@@ -196,15 +205,24 @@ export class PlatformLoginManager {
       while (!job.abort.signal.aborted) {
         if (job.window.isClosed()) { job.status = 'window_closed'; return; }
         if (this.clock() >= deadline) { job.status = 'timeout'; return; }
-        const cookies = await job.window.cookies();
+        let cookies = await job.window.cookies();
         job.abort.signal.throwIfAborted();
         try { platform.pick(cookies); } catch { await this.sleep(); continue; }
-        try { this.save(job.provider, job.accountId, cookies, job.window.userAgent); }
+        const accountName = await job.window.accountName?.().catch(() => undefined);
+        if (job.abort.signal.aborted) return;
+        if (accountName) {
+          cookies = await job.window.cookies();
+          try { platform.pick(cookies); } catch { await this.sleep(); continue; }
+        }
+        if (job.abort.signal.aborted) return;
+        try { this.save(job.provider, job.accountId, cookies, job.window.userAgent, accountName); }
         catch (error) {
           job.status = (error as Error)?.message === 'collection_busy' ? 'collection_busy' : 'session_save_failed';
           return;
         }
-        job.status = 'configured'; return;
+        job.status = 'configured';
+        this.onConnected?.();
+        return;
       }
     } catch (error) {
       if (!job.abort.signal.aborted) {
@@ -217,4 +235,3 @@ export class PlatformLoginManager {
     finally { await job.window?.close().catch(() => {}); }
   }
 }
-export const platformLogin = new PlatformLoginManager();

@@ -1,7 +1,9 @@
-import type { ScheduleScope } from "../../lib/collection-schedule";
+import { COLLECTION_PROVIDER_NAMES, type ScheduleScope } from "../../lib/collection-schedule";
+import type { BloggerSearchState, BloggerSearchStatus } from "../../collector/core/bloggers";
+import { formatTime } from "../../lib/time";
 
 /** 采集域共用文案：采集页(任务/次数上限)与设置·采集记录共用 */
-export const names: Record<string, string> = { index: "抖音指数", douyin: "抖音创作后台", xhs: "小红书创作服务", bili: "B站创作中心" };
+export const names: Record<string, string> = COLLECTION_PROVIDER_NAMES;
 export const collectionNames: Record<ScheduleScope, string> = {
   topic_rank: "话题榜", video_rank: "视频榜", author: "博主追踪",
   index: names.index, douyin: names.douyin, xhs: names.xhs, bili: names.bili,
@@ -12,6 +14,10 @@ export const operations: Record<string, string> = {
   topic_trend: "话题趋势", topic_relation: "关联话题", videos: "视频搜索",
   author_dates: "博主有效日期", author_search: "博主搜索", author_works: "博主作品",
   author_core: "博主日增", author_info: "博主资料",
+};
+export const searchLabels: Record<BloggerSearchState, string> = {
+  queued: "待解析", running: "解析中", blocked: "解析受阻",
+  failed: "解析失败", deferred: "解析延后", not_found: "未找到",
 };
 const errors: Record<string, string> = {
   auth_required: "找不到本账号的授权。请到「采集 → 连接」连接对应平台。",
@@ -44,4 +50,10 @@ export function reason(code: string | null): string | null {
   const http = /^http_error_(\d{3})$/.exec(code);
   if (http) return `平台请求未成功（HTTP ${http[1]}）。请检查平台能否访问。`;
   return Object.hasOwn(errors, code) ? errors[code] : "任务未能完成。请查看同一来源的近期采集记录。";
+}
+
+export function searchMessage({ searchState, error, nextRetryAt }: Partial<BloggerSearchStatus>) {
+  if (searchState === 'not_found') return '未找到该昵称的达人。可到「采集 → 博主」移出后添加正确昵称。';
+  return [reason(error ?? null), nextRetryAt && `预计 ${formatTime(nextRetryAt)} 后可自动重试。`,
+    searchState === 'failed' && '可到「采集 → 日志」重试。'].filter(Boolean).join(' ');
 }

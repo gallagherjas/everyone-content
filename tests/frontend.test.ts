@@ -46,6 +46,13 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     { id: '101', title: '高赞作品', url: 'https://www.douyin.com/video/101', publishedAt: '2026-11-14T00:00:00+08:00', likes: 50 },
   ];
   let manualOutcome = null;
+  let indexBlocker = null;
+  let sharedIndex = false;
+  const indexAuth = () => sharedIndex
+    ? { provider: 'index', status: 'verified', configured: true, message: '登录已通过采集验证。',
+      account_name: '测试抖音号', session_accounts: ['账号1', '账号2'], reuse_accounts: [] }
+    : { provider: 'index', status: 'missing', configured: false, message: '尚未连接。',
+      reuse_accounts: [{ id: 2, name: '账号2', account_name: '测试抖音号' }] };
   const notices = { auth: [], issues: [], bloggers: [] };
   const emptyPlatform = () => ({ configured: false, paused: false, error: null, latest: null, deltaToday: null, delta7d: null, deltaLikes7: null, deltaViews7: null, series: [] });
   const monitorData = { platforms: { douyin: emptyPlatform(), xhs: emptyPlatform(), bili: emptyPlatform() }, total: { fans: 0, deltaToday: null, delta7d: null, platforms: 0 } };
@@ -72,6 +79,7 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
           last_success_at: Date.UTC(2026, 10, 15, 5), error: null },
       ] : [];
       data = { tasks, runs, budgets: [{ provider: 'index', daily_limit: 30, used: 0 }], credentials: { index: true },
+        blockers: { index: indexBlocker, douyin: null, xhs: 'auth_required', bili: 'auth_required' },
         queue: { total: tasks.length, due: tasks.filter(task => task.status === 'due').length },
         discovery: { ready: true, keywords, topics, videos: [], authors: [], counts: { uniqueVideos: 0, excludedKeywords: 0 },
           versions: { topics: '20261113', videos: '20261112' }, pending: { topicSearch: [], videos: [] } } };
@@ -81,7 +89,12 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     else if (/^\/api\/bloggers\/\d+$/.test(url.pathname)) data = { id: 1, kind: 'blogger', userId: 'u1', name: '甲', status: 'ready', profile: {}, works: bloggerWorks, trend: null };
     else if (url.pathname === '/api/notices') data = structuredClone(notices);
     else if (url.pathname === '/api/run/collect' && method === 'POST') data = { started: true, run_id: 1 };
+    else if (url.pathname === '/api/collection/records/2/retry' && method === 'POST') data = { started: true, run_id: 1 };
     else if (url.pathname === '/api/monitor') data = monitorData;
+    else if (url.pathname === '/api/auth/index/reuse' && method === 'POST') {
+      sharedIndex = true; data = indexAuth();
+    }
+    else if (url.pathname === '/api/auth/index') data = indexAuth();
     else if (/^\/api\/auth\/[\w-]+$/.test(url.pathname)) data = { provider: url.pathname.split('/').at(-1), label: '平台', status: 'missing', configured: false, message: '尚未连接。' };
     else if (url.pathname === '/api/sources') data = { keywords: sources.filter(s => s.account === account) };
     else if (/^\/api\/sources\/\d+$/.test(url.pathname) && method === 'DELETE') {
@@ -214,6 +227,15 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     await click('去连接');
     assert.match(window.document.body.textContent, /连接平台/);
     assert.equal(panel(), undefined);
+    const reuseIndex = field('复用其他帐号的抖音指数登录');
+    assert.equal(reuseIndex.previousElementSibling.textContent, '扫码连接');
+    assert.match(reuseIndex.textContent, /账号2 · 测试抖音号/);
+    await act(async () => {
+      reuseIndex.value = '2';
+      reuseIndex.dispatchEvent(new window.Event('change', { bubbles: true }));
+    });
+    assert.deepEqual(requests.find(r => r.url.pathname === '/api/auth/index/reuse').body, { source_account_id: 2 });
+    assert.match(field('抖音指数登录状态').textContent, /测试抖音号.*共用会话：账号1、账号2/);
     await act(async () => { reminder().click(); });
     await click('查看日志');
     assert.ok(visible('h2').some(el => el.textContent === '采集日志'));
@@ -321,11 +343,19 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     await clickField('手动采集视频榜');
     await clickField('手动采集博主追踪');
     assert.deepEqual(requests.filter(r => r.url.pathname === '/api/run/collect').slice(-3).map(r => r.body.only), ['topic_rank', 'video_rank', 'author']);
+    indexBlocker = 'login_required';
+    await act(async () => { for (const fire of timers.values()) await fire(); });
+    assert.equal(field('手动采集话题榜').disabled, true);
+    assert.ok(visible('button').some(el => el.textContent.trim() === '连接设置'));
+    indexBlocker = null;
+    await act(async () => { for (const fire of timers.values()) await fire(); });
     await act(async () => { visible('aside button').find(el => el.textContent === '博主').click(); });
     assert.equal(field('手动采集博主追踪'), undefined);
     await click('日志');
     assert.ok(visible('p').some(el => el.textContent.includes('平台提示未登录')));
     assert.ok(visible('span').some(el => el.textContent === '账号快照'));
+    await clickField('重试账号快照记录 2');
+    assert.ok(requests.some(r => r.url.pathname === '/api/collection/records/2/retry' && r.method === 'POST'));
 
     const reopen = async saved => {
       await act(async () => { root.unmount(); });

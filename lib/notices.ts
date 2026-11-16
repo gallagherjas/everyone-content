@@ -1,6 +1,6 @@
 // 工作台提醒：登录失效、采集异常与博主新作品全部从采集运行态现算，不另存事实。
 import type { DatabaseSync } from 'node:sqlite';
-import { AUTH_ERROR } from './platform-login.ts';
+import { AUTH_ERROR } from './collection-schedule.ts';
 import { profileOf } from '../collector/core/bloggers.ts';
 
 export interface NoticeIssue { kind: 'paused' | 'disabled' | 'run_failed' | 'run_partial'; provider?: string; error?: string; count?: number }

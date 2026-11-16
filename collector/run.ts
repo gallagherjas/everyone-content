@@ -7,16 +7,19 @@ import { planCollection,collectionAccounts } from "./core/planner.ts";
 import { runCollection } from "./core/runner.ts";
 import { registerAuth,configureIndex } from "./core/settings.ts";
 import { collectionOutcome } from "./core/status.ts";
+import { availableProviders } from "./core/availability.ts";
 
 const args = Object.fromEntries(process.argv.slice(2).map((arg) => { const [key,...value]=arg.replace(/^--/, "").split("="); return [key,value.join("=")||true]; }));
 const db=openDb();
 let unlock: (()=>void)|undefined;
 try {
-  if(Object.keys(args).some(k=>!["account","scheduled","only","plan","config","auth","limit"].includes(k)))throw new Error("未知采集参数");
+  if(Object.keys(args).some(k=>!["account","scheduled","only","plan","config","auth","limit","retry-task"].includes(k)))throw new Error("未知采集参数");
   if(args.only&&!COLLECTION_SCOPES.includes(args.only as string))throw new Error("未知采集来源");
   const id=Number(args.account), options={...(id?{accountIds:[id]}:{}),scheduled:!!args.scheduled,...(typeof args.only==="string"?{only:args.only}:{}),...(args.limit?{requestLimit:Number(args.limit)}:{})};
   if(args.account&&(!Number.isSafeInteger(id)||id<1))throw new Error("账号编号无效");
   if(args.limit&&(!Number.isSafeInteger(options.requestLimit)||Number(options.requestLimit)<1))throw new Error("未知或无效的请求上限");
+  const retryTask=args['retry-task'];
+  if(retryTask&&(typeof retryTask!=='string'||!/^[a-f0-9]{64}$/.test(retryTask)||!id))throw new Error('未知或无效的重试任务');
   unlock=lock("collection");
   const store=new CollectionStore(db,DATA);
   if(args.auth||args.config){
@@ -32,12 +35,15 @@ try {
       .map(t=>({provider:t.provider,operation:t.operation,target:t.target}));
     console.log(JSON.stringify({accounts:accounts.map(a=>a.id),due}));
   } else {
-    const accounts=collectionAccounts(db,options);
-    if(!accounts.length)console.log("没有启用的采集账号，本轮跳过。");
+    const candidates=collectionAccounts(db,options);
+    const accounts=candidates.filter(a =>
+      availableProviders(db,a.id,options.only,options.scheduled && !options.only ? a.config.schedules : undefined).size);
+    if(!candidates.length)console.log("没有启用的采集账号，本轮跳过。");
+    else if(!accounts.length)throw new Error("没有可用的采集来源。请在「采集 → 连接」检查账号授权与来源状态。");
     else {
       const lines: {line:string;ids:number[]}[]=[];
       const runId=Number(process.env.EVERYONE_CONTENT_RUN_ID);
-      const result=await runCollection(store,{...options,
+      const result=await runCollection(store,{...options,accountIds:accounts.map(a=>a.id),retryTask:typeof retryTask==='string'?retryTask:undefined,
         log:(line:string,ids:number[])=>{lines.push({line,ids});console.log(line);},
         progress:(percent:number)=>{if(runId&&id)db.prepare('UPDATE task_runs SET progress=? WHERE id=? AND account_id=?').run(percent,runId,id);}});
       for(const a of accounts)await withTask(db,a,"collect",async(log)=>{

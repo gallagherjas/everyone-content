@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import type { DatabaseSync } from 'node:sqlite';
-import { COLLECTION_PROVIDERS, SCHEDULE_SCOPES, type CollectionSchedules } from '../../lib/collection-schedule.ts';
+import { AUTH_ERROR, COLLECTION_PROVIDERS, SCHEDULE_SCOPES, type CollectionSchedules } from '../../lib/collection-schedule.ts';
 import { COLLECTION_DAY_MS, collectionDay, nextCollectionDay } from '../../lib/time.ts';
 
 export const PROVIDERS: readonly string[] = COLLECTION_PROVIDERS;
@@ -24,6 +24,8 @@ export function taskInScope(task: ScopedTask, scope?: string): boolean {
 export function scheduledTaskEnabled(schedules: CollectionSchedules | undefined, task: ScopedTask) {
   return SCHEDULE_SCOPES.some(key => schedules?.[key]?.enabled && taskInScope(task, key));
 }
+export const taskRetryable = `(t.disabled<>0 OR
+  (t.failures>0 AND t.error NOT IN ('interval_pending','daily_budget_exhausted','tick_budget_exhausted')))`;
 export const hash = (value: any): string => createHash('sha256').update(typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(value)).digest('hex');
 export const stamp = (ms: number): string => new Date(ms).toISOString().slice(0,19).replace('T',' ');
 export const taskKey = (provider: string,scope: string,spec: any): string => hash({provider,scope,type:spec.type,id:spec.id??null,keyword:spec.keyword??null,
@@ -76,20 +78,22 @@ export class CollectionStore {
   }
   latest(key: string): any { return this.db.prepare("SELECT * FROM collection_runs WHERE task_key=? AND status='ok' ORDER BY id DESC LIMIT 1").get(key) as any; }
   accounts(key: string): any[] { return this.db.prepare('SELECT a.*,ta.config_sha FROM collection_task_accounts ta JOIN accounts a ON a.id=ta.account_id WHERE task_key=? AND a.status=\'active\'').all(key) as any[]; }
-  dueTasks(accountIds: number[],now=Date.now()): any[] {
+  dueTasks(accountIds: number[],now=Date.now(),retry=false): any[] {
     if(!accountIds.length)return [];
     return this.db.prepare(`SELECT DISTINCT t.* FROM collection_tasks t JOIN collection_task_accounts a ON a.task_key=t.key
       LEFT JOIN collection_provider_state p ON p.provider=t.provider AND p.scope=t.scope
-      WHERE a.account_id IN (${accountIds.map(()=>'?').join(',')}) AND t.provider IN (${PROVIDERS.map(()=>'?').join(',')}) AND t.disabled=0 AND t.next_run_at<=?
-      AND t.lease_until<=? AND COALESCE(p.paused,0)=0 ORDER BY t.priority DESC,t.next_run_at,t.key`).all(...accountIds,...PROVIDERS,now,now) as any[];
+      WHERE a.account_id IN (${accountIds.map(()=>'?').join(',')}) AND t.provider IN (${PROVIDERS.map(()=>'?').join(',')})
+      AND ((t.disabled=0 AND t.next_run_at<=?) OR (? AND ${taskRetryable}))
+      AND t.lease_until<=? AND COALESCE(p.paused,0)=0 ORDER BY t.priority DESC,t.next_run_at,t.key`).all(...accountIds,...PROVIDERS,now,Number(retry),now) as any[];
   }
-  claim(task: any,now=Date.now()): boolean {
-    return this.db.prepare('UPDATE collection_tasks SET lease_owner=?,lease_until=? WHERE key=? AND lease_until<=? AND next_run_at<=?')
-      .run(this.owner,now+900000,task.key,now,now).changes===1;
+  claim(task: any,now=Date.now(),retry=false): boolean {
+    return this.db.prepare(`UPDATE collection_tasks AS t SET lease_owner=?,lease_until=? WHERE key=? AND lease_until<=?
+      AND ((disabled=0 AND next_run_at<=?) OR (? AND ${taskRetryable}))`)
+      .run(this.owner,now+900000,task.key,now,now,Number(retry)).changes===1;
   }
   release(task: any,next: number,error: string | null=null): void {
-    this.db.prepare('UPDATE collection_tasks SET lease_owner=NULL,lease_until=0,next_run_at=?,error=? WHERE key=? AND lease_owner=?')
-      .run(next,error,task.key,this.owner);
+    this.db.prepare('UPDATE collection_tasks SET lease_owner=NULL,lease_until=0,next_run_at=?,error=?,disabled=CASE WHEN ? IS NULL THEN 0 ELSE disabled END WHERE key=? AND lease_owner=?')
+      .run(next,error,error,task.key,this.owner);
   }
   begin(task: any,now=Date.now(),sourceKey: string | null=null,accountIds: number[] | null=null): any {
     const id=Number(this.db.prepare(`INSERT INTO collection_runs(task_key,provider,scope,operation,target,request,observed_at,at_ms,source_key)
@@ -97,6 +101,14 @@ export class CollectionStore {
     for(const a of this.accounts(task.key).filter(a=>!accountIds||accountIds.includes(a.id)))
       this.db.prepare('INSERT INTO collection_run_accounts VALUES(?,?,?)').run(id,a.id,a.config_sha);
     return this.db.prepare('SELECT * FROM collection_runs WHERE id=?').get(id) as any;
+  }
+  credentialForRun(runId: number) {
+    return this.db.prepare(`SELECT c.auth_path,t.last_success_at FROM collection_runs r
+      JOIN collection_tasks t ON t.key=r.task_key
+      JOIN collection_run_accounts a ON a.run_id=r.id
+      JOIN collection_credentials c ON c.account_id=a.account_id AND c.provider=r.provider AND c.scope=r.scope
+      WHERE r.id=? ORDER BY a.account_id LIMIT 1`).get(runId) as
+      { auth_path: string; last_success_at: number | null } | undefined;
   }
   reuse(runId: number, previousId: number, version: string): void {
     atomic(this.db,()=>{
@@ -148,7 +160,14 @@ export class CollectionStore {
     if(task?.lease_owner&&task.lease_owner!==this.owner)return;
     this.db.prepare('UPDATE collection_tasks SET failures=failures+1 WHERE key=?').run(run.task_key);
     const failures=(this.db.prepare('SELECT failures FROM collection_tasks WHERE key=?').get(run.task_key) as any).failures;
-    if(/login_required|rate_limited|payment_required|auth_required|invalid_auth|invalid_user_agent|auth_file|ENOENT/.test(code))this.pause(run.provider,run.scope,code);
+    if(AUTH_ERROR.test(code)||code==='rate_limited'||code==='payment_required')this.pause(run.provider,run.scope,code);
+    if(run.provider==='index'&&AUTH_ERROR.test(code)){
+      const credential=this.credentialForRun(run.id);
+      if(credential){
+        for(const row of this.db.prepare("SELECT scope FROM collection_credentials WHERE provider='index' AND auth_path=? AND scope<>?").all(credential.auth_path,run.scope))
+          this.pause('index',String(row.scope),code);
+      }
+    }
     if(/schema_error|decode_error|unsupported_encryption/.test(code))this.db.prepare('UPDATE collection_tasks SET disabled=1 WHERE provider=? AND scope=? AND operation=?').run(run.provider,run.scope,run.operation);
     // 除登录限流(暂停来源)与结构错误(按操作停用)外的错误连续 3 次即停用该任务,不再无限重试;成功清零,重连授权或 resume 恢复。
     if(failures>=3)this.db.prepare('UPDATE collection_tasks SET disabled=1 WHERE key=?').run(run.task_key);

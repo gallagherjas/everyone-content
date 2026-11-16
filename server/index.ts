@@ -28,20 +28,23 @@ import {
   DATA,
 } from '../lib/strategies.ts';
 import { initializationOverview } from '../lib/initialization.ts';
-import { platformLogin, LOGIN_PLATFORMS } from '../lib/platform-login.ts';
+import { PlatformLoginManager, LOGIN_PLATFORMS } from '../lib/platform-login.ts';
 import { monitorOverview } from '../lib/monitor.ts';
 import { noticeOverview } from '../lib/notices.ts';
 import { CollectionStore, PROVIDERS, atomic } from '../collector/core/store.ts';
-import { COLLECTION_SCOPES } from '../lib/collection-schedule.ts';
+import { AUTH_ERROR, COLLECTION_PROVIDERS, COLLECTION_PROVIDER_NAMES, COLLECTION_SCOPES, providerForScope, type CollectionProvider } from '../lib/collection-schedule.ts';
+import { availableProviders, sourceBlocker } from '../collector/core/availability.ts';
+import { credentialBinding, resumeSource } from '../collector/core/settings.ts';
+import { removeUnusedIndexSession } from '../lib/index-sessions.ts';
 import { collectionStatus } from '../collector/core/status.ts';
 import { normalize } from '../collector/core/discovery.ts';
 import { planCollection } from '../collector/core/planner.ts';
 import { bloggerOverview, bloggerDetail } from '../collector/core/bloggers.ts';
-import { runScheduledCollection } from '../lib/collection-scheduler.ts';
+import { pendingBloggerAccount, runScheduledCollection, type CollectionLaunch } from '../lib/collection-scheduler.ts';
 import { writingCorpus, saveWriting } from '../lib/writing.ts';
 const PORT = Number(process.env.WEB_PORT ?? 8788),
   DIST = join(ROOT, 'frontend', 'dist');
-const TASKS: Record<string, string> = { collect: 'collector/run.ts' };
+const platformLogin = new PlatformLoginManager({ onConnected: () => setTimeout(scheduleCollection, 0).unref() });
 const json = (res: ServerResponse, data: unknown, code = 200) => {
   res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
   res.end(JSON.stringify(data));
@@ -103,23 +106,36 @@ function taskState(db: DatabaseSync, accountId: number, task: string, runId: num
   }
   return { ...r, running: r?.status === 'running', log: r?.log || '' };
 }
-function startTask(db: DatabaseSync, accountId: number, task: string, extra: string[] = []) {
-  if (!TASKS[task]) throw new InputError('未知任务');
-  const group = ['collect'];
+function requireSource(db: DatabaseSync, accountId: number, provider: CollectionProvider) {
+  const error = sourceBlocker(db, accountId, provider);
+  if (!error) return;
+  const label = COLLECTION_PROVIDER_NAMES[provider];
+  throw new InputError(AUTH_ERROR.test(error) ? `请到「采集 → 连接」连接或重新连接${label}。`
+    : `${label}采集已暂停，请处理后恢复采集。`, 409);
+}
+function startCollection(db: DatabaseSync, accountId: number, options: CollectionLaunch = {}) {
+  activeAccount(db, accountId);
+  const { only, scheduled, limit, retryTask } = options;
+  if (only) requireSource(db, accountId, providerForScope(only));
+  else if (!availableProviders(db, accountId).size)
+    throw new InputError('当前账号暂无可用的采集来源。请到「采集 → 连接」检查授权与来源状态。', 409);
   const jobs = db
-    .prepare(
-      `SELECT DISTINCT account_id,task FROM task_runs WHERE status='running' AND task IN (${group.map(() => '?').join(',')})`,
-    )
-    .all(...group) as { account_id: number; task: string }[];
+    .prepare("SELECT id,account_id FROM task_runs WHERE status='running' AND task='collect'")
+    .all() as { id: number; account_id: number }[];
   for (const job of jobs)
-    if (taskState(db, job.account_id, job.task).running)
+    if (taskState(db, job.account_id, 'collect', job.id).running)
       throw new InputError('共享采集资源正在使用中，请稍后重试', 409);
   try { const unlock = lock('collection'); unlock(); }
   catch { throw new InputError('共享采集资源正在使用中，请稍后重试', 409); }
   const runId = Number(
-    db.prepare('INSERT INTO task_runs(account_id,task) VALUES(?,?)').run(accountId, task).lastInsertRowid,
+    db.prepare("INSERT INTO task_runs(account_id,task) VALUES(?,'collect')").run(accountId).lastInsertRowid,
   );
-  const child = spawn(process.execPath, [TASKS[task], `--account=${accountId}`, ...extra], {
+  const args = ['collector/run.ts', `--account=${accountId}`];
+  if (only) args.push(`--only=${only}`);
+  if (scheduled) args.push('--scheduled');
+  if (limit) args.push(`--limit=${limit}`);
+  if (retryTask) args.push(`--retry-task=${retryTask}`);
+  const child = spawn(process.execPath, args, {
     cwd: ROOT,
     stdio: ['ignore', 'ignore', 'pipe'],
     env: {
@@ -150,7 +166,7 @@ function startTask(db: DatabaseSync, accountId: number, task: string, extra: str
     } finally {
       conn.close();
     }
-    setTimeout(scheduleCollection, 0).unref();
+    if (code === 0) setTimeout(scheduleCollection, 0).unref();
   };
   child.on('error', (e) => {
     error = String(e);
@@ -164,7 +180,9 @@ function scheduleCollection() {
   let db: DatabaseSync | undefined;
   try {
     db = openDb();
-    runScheduledCollection(db, (id, args) => startTask(db!, id, 'collect', args));
+    if (runScheduledCollection(db, (id, options) => startCollection(db!, id, options))) return;
+    const pending = pendingBloggerAccount(db);
+    if (pending) startCollection(db, pending, { only: 'author' });
   } catch (error) {
     if (!(error instanceof InputError && error.status === 409)) console.error('定时采集调度失败：', error instanceof Error ? error.message : '未知错误');
   } finally { db?.close(); }
@@ -188,12 +206,17 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
   if (path === '/api/context' && method === 'GET')
     return json(res, context(db, id, url.searchParams.get('strategy_sha')));
   if (method !== 'GET' && !/^\/api\/(auth\/[\w-]+\/cancel|accounts\/\d+)$/.test(path)) activeAccount(db, id);
-  const auth = path.match(/^\/api\/auth\/([\w-]+)(\/(start|cancel))?$/);
+  const auth = path.match(/^\/api\/auth\/([\w-]+)(?:\/(start|cancel|reuse))?$/);
   if (auth && LOGIN_PLATFORMS[auth[1]]) {
     const provider = auth[1];
-    if (auth[3] === 'start' && method === 'POST') return json(res, platformLogin.start(db, id, provider), 202);
-    if (auth[3] === 'cancel' && method === 'POST') return json(res, await platformLogin.cancel(db, id, provider));
-    if (!auth[3] && method === 'GET') return json(res, platformLogin.state(db, id, provider));
+    if (auth[2] === 'start' && method === 'POST') return json(res, platformLogin.start(db, id, provider), 202);
+    if (auth[2] === 'cancel' && method === 'POST') return json(res, await platformLogin.cancel(db, id, provider));
+    if (auth[2] === 'reuse' && provider === 'index' && method === 'POST') {
+      const { source_account_id } = await body(req);
+      if (!Number.isSafeInteger(source_account_id) || source_account_id < 1) throw new InputError('请选择要复用会话的帐号');
+      return json(res, await platformLogin.reuseIndex(db, id, source_account_id));
+    }
+    if (!auth[2] && method === 'GET') return json(res, platformLogin.state(db, id, provider));
   }
   const acct = path.match(/^\/api\/accounts\/(\d+)$/);
   if (acct && method === 'PUT') {
@@ -216,16 +239,22 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
   }
   if (acct && method === 'DELETE') {
     if (Number(acct[1]) !== id) throw new InputError('账号上下文不一致', 409);
-    // 依赖顺序:快照先于作品、定时记录先于任务进程,全部子行删除后再删账号本体;采集任务队列保留为全局历史。
-    atomic(db, () => {
-      db.prepare('DELETE FROM content_snapshots WHERE content_id IN (SELECT id FROM contents WHERE account_id=?)').run(id);
-      db.prepare('DELETE FROM collection_schedule_runs WHERE account_id=?').run(id);
-      for (const table of ['contents', 'task_runs', 'account_sources', 'account_works', 'account_initialization',
-        'strategy_audit', 'collection_run_accounts', 'collection_task_accounts', 'collection_credentials'])
-        db.prepare(`DELETE FROM ${table} WHERE account_id=?`).run(id);
-      db.prepare('DELETE FROM accounts WHERE id=?').run(id);
-    });
-    dropProfile(id);
+    let unlock: () => void;
+    try { unlock = lock('collection'); }
+    catch { throw new InputError('采集正在运行，请等本轮结束后删除帐号。', 409); }
+    try {
+      const file = credentialBinding(db, id, 'index')?.auth_path;
+      atomic(db, () => {
+        db.prepare('DELETE FROM content_snapshots WHERE content_id IN (SELECT id FROM contents WHERE account_id=?)').run(id);
+        db.prepare('DELETE FROM collection_schedule_runs WHERE account_id=?').run(id);
+        for (const table of ['contents', 'task_runs', 'account_sources', 'account_works', 'account_initialization',
+          'strategy_audit', 'collection_run_accounts', 'collection_task_accounts', 'collection_credentials'])
+          db.prepare(`DELETE FROM ${table} WHERE account_id=?`).run(id);
+        db.prepare('DELETE FROM accounts WHERE id=?').run(id);
+      });
+      removeUnusedIndexSession(db, file);
+      dropProfile(id);
+    } finally { unlock(); }
     return json(res, { ok: true });
   }
   if (path === '/api/collection/config') {
@@ -270,14 +299,21 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
     db.prepare('UPDATE collection_limits SET daily_limit=? WHERE provider=?').run(b.daily_limit, b.provider);
     return json(res, { ok: true });
   }
-  const collectionRecord = path.match(/^\/api\/collection\/records\/(\d+)(\/raw)?$/);
-  if (collectionRecord && method === 'GET') {
+  const collectionRecord = path.match(/^\/api\/collection\/records\/(\d+)(?:\/(raw|retry))?$/);
+  if (collectionRecord && (collectionRecord[2] === 'retry' ? method === 'POST' : method === 'GET')) {
     const r = db
       .prepare(
         `SELECT r.* FROM collection_runs r JOIN collection_run_accounts x ON x.run_id=r.id WHERE r.id=? AND x.account_id=?`,
       )
       .get(Number(collectionRecord[1]), id) as Record<string, any> | undefined;
     if (!r) throw new InputError('采集记录不存在或不属于当前账号', 404);
+    if (collectionRecord[2] === 'retry') {
+      if (r.status !== 'failed') throw new InputError('请选择失败的采集记录', 409);
+      if (!r.task_key || !PROVIDERS.includes(r.provider) ||
+        !db.prepare('SELECT 1 FROM collection_task_accounts WHERE account_id=? AND task_key=?').get(id, r.task_key))
+        throw new InputError('关联任务已移出队列。', 409);
+      return json(res, startCollection(db, id, { only: r.provider, retryTask: r.task_key }), 202);
+    }
     const store = new CollectionStore(db, DATA);
     if (collectionRecord[2]) {
       const raw = db
@@ -299,24 +335,18 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
     });
   }
   if (path === '/api/collection/resume' && method === 'POST') {
-    const b = await body(req),
-      provider = text(b.provider, '来源', 20);
-    if (!PROVIDERS.includes(provider)) throw new InputError('采集来源无效');
-    const scopes = db
-      .prepare(
-        'SELECT DISTINCT t.scope FROM collection_tasks t JOIN collection_task_accounts x ON x.task_key=t.key WHERE x.account_id=? AND t.provider=?',
-      )
-      .all(id, provider) as { scope: string }[];
-    if (!scopes.length) throw new InputError('来源不属于当前账号', 404);
-    for (const { scope } of scopes) {
-      db.prepare('UPDATE collection_provider_state SET paused=0,error=NULL WHERE provider=? AND scope=?').run(
-        provider,
-        scope,
-      );
-      db.prepare(
-        'UPDATE collection_tasks SET disabled=0,error=NULL,next_run_at=0 WHERE provider=? AND scope=? AND key IN(SELECT task_key FROM collection_task_accounts WHERE account_id=?)',
-      ).run(provider, scope, id);
-    }
+    const provider = text((await body(req)).provider, '来源', 20) as CollectionProvider;
+    if (!COLLECTION_PROVIDERS.includes(provider)) throw new InputError('采集来源无效');
+    const error = sourceBlocker(db, id, provider);
+    if (error && AUTH_ERROR.test(error)) requireSource(db, id, provider);
+    const credential = db.prepare('SELECT scope FROM collection_credentials WHERE account_id=? AND provider=?').get(id, provider);
+    if (!credential) throw new InputError('来源不属于当前账号', 404);
+    let unlock: () => void;
+    try { unlock = lock('collection'); }
+    catch { throw new InputError('共享采集资源正在使用中，请稍后重试', 409); }
+    try { resumeSource(db, id, provider, String(credential.scope)); }
+    finally { unlock(); }
+    setTimeout(scheduleCollection, 0).unref();
     return json(res, { ok: true });
   }
   if (path === '/api/sources' && method === 'GET') {
@@ -349,12 +379,12 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
     activeAccount(db, id);
     const keyword = text((await body(req)).keyword, '博主昵称', 80).trim();
     if (!keyword) throw new InputError('博主昵称不能为空');
+    requireSource(db, id, 'index');
     if (sources(db, id).some(s => s.kind === 'blogger_search' && s.source_key === keyword))
-      throw new InputError('该昵称已在解析中', 409);
+      throw new InputError('该昵称已登记，请查看现有解析状态。', 409);
     db.prepare("INSERT INTO account_sources(account_id,kind,source_key,name,note) VALUES(?,'blogger_search',?,?,'')").run(id, keyword, keyword);
-    // 立即触发一轮达友域采集解析昵称；若已有采集在跑，搜索任务留给那轮或下一次。
-    try { startTask(db, id, 'collect', ['--only=author']); } catch { /* 采集进行中，解析顺延 */ }
-    return json(res, { ok: true, message: '已登记昵称，解析完成后将出现在列表中。' }, 201);
+    setTimeout(scheduleCollection, 0).unref();
+    return json(res, { ok: true, message: '已登记昵称，等待解析。' }, 201);
   }
   const blogger = path.match(/^\/api\/bloggers\/(\d+)$/);
   if (blogger && ['GET', 'PUT', 'DELETE'].includes(method || '')) {
@@ -433,13 +463,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
   if (path === '/api/monitor' && method === 'GET') return json(res, monitorOverview(db, id));
   if (path === '/api/notices' && method === 'GET') return json(res, noticeOverview(db, id));
   if (path === '/api/run/collect' && method === 'POST') {
-    const b = await body(req),
-      extra: string[] = [];
-    if (b.only) {
-      if (!COLLECTION_SCOPES.includes(b.only)) throw new InputError('采集范围无效');
-      extra.push(`--only=${b.only}`);
-    }
-    return json(res, startTask(db, id, 'collect', extra), 202);
+    const { only } = await body(req);
+    if (only !== undefined && !COLLECTION_SCOPES.includes(only)) throw new InputError('采集范围无效');
+    return json(res, startCollection(db, id, { only }), 202);
   }
   throw new InputError('接口不存在', 404);
 }

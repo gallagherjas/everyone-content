@@ -15,9 +15,11 @@ const {runCollection}=await import('../collector/core/runner.ts');
 const {planCollection}=await import('../collector/core/planner.ts');
 const {registerAuth,configureIndex}=await import('../collector/core/settings.ts');
 const {collectionStatus,collectionOutcome}=await import('../collector/core/status.ts');
-const {connectionStatus}=await import('../lib/platform-login.ts');
+const {connectionStatus}=await import('../collector/core/availability.ts');
 const {monitorOverview}=await import('../lib/monitor.ts');
 const {bloggerOverview,bloggerDetail}=await import('../collector/core/bloggers.ts');
+const {pendingBloggerAccount}=await import('../lib/collection-scheduler.ts');
+const {reuseIndexSession,saveIndexSession}=await import('../lib/index-sessions.ts');
 const {defaultSchedules}=await import('../lib/collection-schedule.ts');
 const DAY=86400000,HOUR=3600000,base=Date.UTC(2026,10,7,2);
 function setup(){const db=new DatabaseSync(':memory:');migrate(db,':memory:');createAccount(db,'采集测试账号');db.prepare('UPDATE collection_limits SET interval_ms=0').run();return {db,store:new CollectionStore(db,join(root,hash(Math.random()))) };}
@@ -96,6 +98,39 @@ test('某账号登录失效不影响另一账号，同词查询与结果归属�
   assert.equal(db.prepare('SELECT COUNT(*) n FROM account_works WHERE account_id=?').get(second.id).n,1);
   assert.equal(calls.filter(r=>r.cookie==='expired').length,1);assert.equal(collectionStatus(db,account(db,second.id),store).runs.some(r=>r.status==='ok'),true);
  }finally{db.close();}
+});
+test('复用指数授权共享验证与失效状态，采集轮次仍按工作台帐号隔离', async () => {
+  const { db, store } = setup();
+  try {
+    const second = createAccount(db, '复用帐号'), third = createAccount(db, '独立帐号');
+    saveIndexSession(db, 1, { cookie: 'source-session', accountName: '来源帐号' }, root);
+    saveIndexSession(db, third.id, { cookie: 'other-session' }, root);
+    await reuseIndexSession(db, second.id, 1, root);
+    const opts = { accountIds: [second.id], only: 'topic_rank', clock: () => base, sleep: async () => {} };
+    const validResponse = () => json({ data: { valid_day: '20261106', valid_week: '20261101' } });
+    await runCollection(store, { ...opts, fetchImpl: async (_input: any, init: any) => {
+      assert.equal(init.headers.cookie, 'source-session');
+      return validResponse();
+    } });
+    assert.equal(connectionStatus(db, 1, 'index').status, 'verified');
+    assert.equal(connectionStatus(db, second.id, 'index').status, 'verified');
+    assert.deepEqual(db.prepare('SELECT DISTINCT account_id FROM collection_run_accounts').all().map(row => row.account_id), [second.id]);
+    await runCollection(store, { ...opts, clock: () => base + DAY, fetchImpl: async () => json({}, 401) });
+    assert.equal(connectionStatus(db, 1, 'index').status, 'expired');
+    assert.equal(connectionStatus(db, second.id, 'index').status, 'expired');
+    assert.equal(connectionStatus(db, third.id, 'index').status, 'configured');
+
+    saveIndexSession(db, second.id, { cookie: 'renewed-session' }, root);
+    assert.equal(connectionStatus(db, 1, 'index').status, 'configured');
+    await runCollection(store, { ...opts, accountIds: [1], fetchImpl: async (_input: any, init: any) => {
+      assert.equal(init.headers.cookie, 'renewed-session');
+      return validResponse();
+    } });
+    await reuseIndexSession(db, 1, third.id, root);
+    const binding = (id: number) => db.prepare("SELECT auth_path FROM collection_credentials WHERE account_id=? AND provider='index'").get(id).auth_path;
+    assert.equal(binding(1), binding(third.id));
+    assert.notEqual(binding(1), binding(second.id));
+  } finally { db.close(); }
 });
 test('任务租约并发保护、超时恢复与旧worker写入保护',()=>{
  const {db,store}=setup();try{
@@ -574,6 +609,63 @@ test('手动采集按范围独立：topic 只跑话题域，author 只跑达友�
   assert.deepEqual(calls,['get_great_user_top_video']);
   assert.deepEqual(windows,[{start_date:'20261009',end_date:'20261107'},{start_date:'20261010',end_date:'20261108'}]);
  }finally{db.close();}
+});
+test('旧博主登记可在重连后自动续跑，手动重试尊重来源状态和后续额度', async () => {
+  const { db, store } = setup();
+  try {
+    const read = () => bloggerOverview(db, store, 1, base)[0];
+    const pending = () => pendingBloggerAccount(db, base);
+    const file = join(root, 'blogger-reconnect.json');
+    writeFileSync(file, JSON.stringify({ cookie: 'synthetic-session' }), { mode: 0o600 });
+    const otherFile = join(root, 'blogger-bili.json');
+    writeFileSync(otherFile, JSON.stringify({ cookie: 'synthetic-bili-session' }), { mode: 0o600 });
+    registerAuth(store, 1, otherFile, 'bili');
+    db.prepare("INSERT INTO account_sources(account_id,kind,source_key,name) VALUES(1,'blogger_search','影视飓风','影视飓风')").run();
+    assert.equal(read().searchState, 'blocked');
+    assert.equal(pending(), undefined);
+
+    registerAuth(store, 1, file);
+    assert.equal(read().searchState, 'queued');
+    assert.equal(pending(), 1);
+    const opts = { accountIds: [1], only: 'author', clock: () => base, sleep: async () => {} };
+    assert.equal((await runCollection(store, { ...opts, fetchImpl: async () => json({}, 500) })).failed, 1);
+    assert.equal(read().searchState, 'failed');
+    assert.equal(read().error, 'http_error_500');
+    assert.ok(read().nextRetryAt > base);
+    assert.equal(pending(), undefined);
+
+    // 显式重试可提前执行；来源失效后必须重新连接。
+    const retryTask = db.prepare("SELECT key FROM collection_tasks WHERE target='影视飓风'").get().key;
+    db.prepare("INSERT INTO account_sources(account_id,kind,source_key,name) VALUES(1,'blogger_search','其他博主','其他博主')").run();
+    const retriedKeywords: string[] = [];
+    assert.equal((await runCollection(store, { ...opts, retryTask, fetchImpl: async (_input: any, init: any) => {
+      retriedKeywords.push(JSON.parse(init.body).keyword);
+      return json({}, 500);
+    } })).failed, 1);
+    assert.deepEqual(retriedKeywords, ['影视飓风']);
+    db.prepare("DELETE FROM account_sources WHERE source_key='其他博主'").run();
+    assert.equal((await runCollection(store, { ...opts, retryTask, fetchImpl: async () => json({}, 401) })).failed, 1);
+    assert.equal(read().searchState, 'blocked');
+    assert.equal(read().error, 'login_required');
+    assert.equal(pending(), undefined);
+    await runCollection(store, { ...opts, retryTask, fetchImpl: () => assert.fail('授权失效时不能请求平台') });
+
+    registerAuth(store, 1, file);
+    assert.equal(pending(), 1);
+    await runCollection(store, {
+      ...opts, requestLimit: 1,
+      fetchImpl: async (_input: any, init: any) => {
+        assert.equal(init.headers.cookie, 'synthetic-session');
+        return json({ data: { userlist: [{ user_id: 'diguser2', user_name: '影视飓风' }] } });
+      },
+    });
+    assert.equal(read().kind, 'blogger');
+    assert.equal(pending(), 1);
+    const result = await runCollection(store, { ...opts, fetchImpl: async () =>
+      json({ data: { like_list: [], comment_list: [], share_list: [], follow_list: [], index_list: [], create_time_list: [] } }) });
+    assert.equal(result.completed, 1);
+    assert.equal(pending(), undefined);
+  } finally { db.close(); }
 });
 test('话题和视频独立采集有效期，达人跟随视频，定时只执行启用的范围',async()=>{
  const {db,store}=setup();try{

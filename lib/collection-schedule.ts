@@ -3,11 +3,15 @@ import { formatTime } from './time.ts';
 export const PLATFORM_PROVIDERS = ['douyin', 'xhs', 'bili'] as const;
 export const COLLECTION_PROVIDERS = ['index', ...PLATFORM_PROVIDERS] as const;
 export type CollectionProvider = typeof COLLECTION_PROVIDERS[number];
+export const COLLECTION_PROVIDER_NAMES: Record<CollectionProvider, string> = {
+  index: '抖音指数', douyin: '抖音创作后台', xhs: '小红书创作服务', bili: 'B站创作中心',
+};
+export const AUTH_ERROR = /^(login_required|auth_required|invalid_auth_cookie|invalid_user_agent|auth_file_must_be_private_0600)$/;
 export const INDEX_SCOPES = ['topic_rank', 'video_rank', 'author'] as const;
 export const SCHEDULE_SCOPES = [...INDEX_SCOPES, ...COLLECTION_PROVIDERS] as const;
 export type ScheduleScope = typeof SCHEDULE_SCOPES[number];
 export const COLLECTION_SCOPES: readonly string[] = [...SCHEDULE_SCOPES, 'topic'];
-export const providerForSchedule = (scope: ScheduleScope): CollectionProvider =>
+export const providerForScope = (scope: string): CollectionProvider =>
   COLLECTION_PROVIDERS.find(provider => provider === scope) ?? 'index';
 
 export interface CollectionSchedule {

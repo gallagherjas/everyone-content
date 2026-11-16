@@ -1,7 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { COLLECTION_DAY_MS, collectionDay } from './time.ts';
 import { SNAPSHOT_PLATFORMS } from '../collector/sources/platform/snapshot.ts';
-import { connectionStatus } from './platform-login.ts';
+import { connectionStatus } from '../collector/core/availability.ts';
 
 interface SnapshotPoint { at: string; fans: number | null; likes: number | null; works: number | null; views: number | null }
 

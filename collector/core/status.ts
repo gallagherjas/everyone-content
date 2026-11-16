@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { indexSelection,selectionView } from './projection.ts';
 import { freshSnapshots, taskKey, type CollectionStore } from './store.ts';
+import { collectionBlockers } from './availability.ts';
 import { collectionDay, collectionDayStart } from '../../lib/time.ts';
 import { indexEffectiveVersion, usesTopicDates, type TopicDates } from '../sources/douyin-index/protocol.ts';
 
@@ -41,8 +42,8 @@ export function collectionStatus(db: DatabaseSync,a: any,store: CollectionStore 
       WHERE r.task_key=t.key AND a.account_id=x.account_id AND r.status IN ('ok','cached')
         AND (r.at_ms>=? OR (r.id=t.last_success_id AND t.last_success_at>=?))
       ORDER BY r.at_ms DESC,r.id DESC LIMIT 1) END today_version,
-    CASE WHEN ? THEN 'archived' WHEN t.disabled<>0 THEN 'disabled' WHEN COALESCE(p.paused,0)<>0 THEN 'paused'
-      WHEN t.lease_until>? THEN 'running' WHEN t.next_run_at<=? THEN 'due' ELSE 'waiting' END status
+    CASE WHEN ? THEN 'archived' WHEN COALESCE(p.paused,0)<>0 THEN 'paused' WHEN t.lease_until>? THEN 'running'
+      WHEN t.disabled<>0 THEN 'disabled' WHEN t.next_run_at<=? THEN 'due' ELSE 'waiting' END status
     FROM collection_tasks t JOIN collection_task_accounts x ON x.task_key=t.key
     LEFT JOIN collection_provider_state p ON p.provider=t.provider AND p.scope=t.scope
     WHERE x.account_id=? ORDER BY t.priority DESC,t.next_run_at,t.key`)
@@ -74,5 +75,5 @@ export function collectionStatus(db: DatabaseSync,a: any,store: CollectionStore 
     WHERE x.account_id=? AND r.provider='index' AND r.status='ok' LIMIT 1`).get(a.id)))
     discovery=selectionView(indexSelection(store,a));
   const queue={total:tasks.length,due:tasks.filter(t=>t.status==='due').length};
-  return {tasks,runs,budgets,discovery,queue,credentials};
+  return {tasks,runs,budgets,discovery,queue,credentials,blockers:collectionBlockers(db,a.id)};
 }

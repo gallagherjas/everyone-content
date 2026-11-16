@@ -3,7 +3,8 @@ import { indexEffectiveVersion,requestFor,semanticHash,usesTopicDates } from '..
 import { SNAPSHOT_PLATFORMS,snapshotExecute } from '../sources/platform/snapshot.ts';
 import { atomic,freshSnapshots,taskKey,taskInScope,scheduledTaskEnabled, type CollectionStore } from './store.ts';
 import { parseJson } from '../../lib/json.ts';
-import { COLLECTION_SCOPES } from '../../lib/collection-schedule.ts';
+import { COLLECTION_SCOPES, type CollectionProvider } from '../../lib/collection-schedule.ts';
+import { availableProviders } from './availability.ts';
 import { COLLECTION_DAY_MS, collectionDay, collectionDayStart, nextCollectionDay, parseCollectionDay } from '../../lib/time.ts';
 
 import { planCollection } from './planner.ts';
@@ -36,7 +37,7 @@ function transport(store: CollectionStore,run: any,counts: Record<string,number>
 async function execute(store: CollectionStore,run: any,client: any,clock: ()=>number): Promise<any> {
   if (run.provider !== 'index') return snapshotExecute(store,run,client,clock);
   const spec=JSON.parse(run.request);
-  const credential=store.db.prepare('SELECT c.auth_path FROM collection_credentials c JOIN collection_task_accounts a ON a.account_id=c.account_id WHERE a.task_key=? AND c.scope=? LIMIT 1').get(run.task_key,run.scope) as any;
+  const credential=store.credentialForRun(run.id);
   const datesRun=usesTopicDates(spec.type)?store.latest(taskKey('index',run.scope,{type:'topic_dates'})):null;
   const version=indexEffectiveVersion(spec.type,collectionDay(run.at_ms),datesRun?store.data(datesRun):null);
   if(!version)throw new Error('source_dates_missing');
@@ -51,7 +52,7 @@ async function execute(store: CollectionStore,run: any,client: any,clock: ()=>nu
 }
 
 export interface RunOptions {
-  accountIds?: number[]; scheduled?: boolean; only?: string;
+  accountIds?: number[]; scheduled?: boolean; only?: string; retryTask?: string;
   requestLimit?: number; fetchImpl?: typeof fetch;
   clock?: () => number; sleep?: (ms: number) => Promise<void>;
   log?: (message: string, participants: number[]) => void;
@@ -61,9 +62,26 @@ export async function runCollection(store: CollectionStore,options: RunOptions={
   if(options.only&&!COLLECTION_SCOPES.includes(options.only))throw new Error('未知采集来源');
   const clock=options.clock??Date.now,sleep=options.sleep??(ms=>new Promise(r=>setTimeout(r,ms))),counts: Record<string,number>={};
   const accounts=planCollection(store,{...options,now:clock()}),ids=accounts.map(a=>a.id),served: Record<number,number>={};
+  const accountById = new Map(accounts.map(a => [a.id, a]));
+  const providers = new Map(accounts.map(a => [a.id, availableProviders(store.db, a.id, options.only,
+    options.scheduled && !options.only ? a.config.schedules : undefined)]));
   for(const a of accounts)served[a.id]=(store.db.prepare("SELECT COUNT(*) n FROM collection_run_accounts a JOIN collection_runs r ON r.id=a.run_id WHERE a.account_id=? AND r.at_ms>=?").get(a.id,collectionDayStart(clock())) as any).n;
   const visited=new Set<string>();
-  const due=()=>store.dueTasks(ids,clock()).filter(task=>!visited.has(task.key)&&taskInScope(task,options.only));
+  const participantsFor = (task: any) => store.accounts(task.key).filter(a =>
+    providers.get(a.id)?.has(task.provider as CollectionProvider) &&
+    (!options.scheduled || options.only || scheduledTaskEnabled(accountById.get(a.id)?.config.schedules, task))).map(a => a.id);
+  const retryTarget = options.retryTask
+    ? store.db.prepare('SELECT provider,scope,operation FROM collection_tasks WHERE key=?').get(options.retryTask)
+    : undefined;
+  const prerequisite = retryTarget?.provider === 'index' && usesTopicDates(String(retryTarget.operation))
+    ? taskKey('index', String(retryTarget.scope), { type: 'topic_dates' }) : undefined;
+  const due=()=>{
+    const tasks = store.dueTasks(ids, clock(), !!options.retryTask)
+      .filter(task=>!visited.has(task.key)&&taskInScope(task,options.only)&&participantsFor(task).length);
+    if (!options.retryTask) return tasks;
+    return tasks.some(task => task.key === options.retryTask) ? tasks.filter(task =>
+      task.key === options.retryTask || task.key === prerequisite) : [];
+  };
   const compare=(a: any,b: any)=>{
     const fairness=(t: any)=>Math.min(...store.accounts(t.key).map((a: any)=>served[a.id]??0));
     const urgency=(t: any)=>t.priority+Math.log1p(Math.max(0,clock()-t.next_run_at)/HOUR);
@@ -72,9 +90,10 @@ export async function runCollection(store: CollectionStore,options: RunOptions={
   const exhausted=new Set<string>(),summary={completed:0,cached:0,failed:0,deferred:0,requests:counts,
     accounts:Object.fromEntries(ids.map(id=>[id,{completed:0,cached:0,failed:0,deferred:0}]))};
   // 点单个平台时展示当日缓存，已到换日的任务走正常领取与请求。
-  if(!options.scheduled&&options.only&&Object.hasOwn(SNAPSHOT_PLATFORMS,options.only)){
+  if(!options.retryTask&&!options.scheduled&&options.only&&Object.hasOwn(SNAPSHOT_PLATFORMS,options.only)){
     const at=clock();
     for(const id of ids){
+      if (!providers.get(id)?.has(options.only as CollectionProvider)) continue;
       const [snapshot]=freshSnapshots(store.db,id,at,options.only);
       if(!snapshot)continue;
       atomic(store.db,()=>{
@@ -102,8 +121,7 @@ export async function runCollection(store: CollectionStore,options: RunOptions={
     options.progress?.(Math.min(99,Math.round(done*100/total)));
     if(task.provider==='index'&&usesTopicDates(task.operation)&&!store.latest(taskKey('index',task.scope,{type:'topic_dates'})))continue;
     if((store.db.prepare('SELECT paused FROM collection_provider_state WHERE provider=? AND scope=?').get(task.provider,task.scope) as any)?.paused)continue;
-    const assigned=new Set(store.accounts(task.key).map((a: any)=>a.id));
-    const participants=accounts.filter(a=>assigned.has(a.id)&&(!options.scheduled||options.only||scheduledTaskEnabled(a.config.schedules,task))).map(a=>a.id);
+    const participants=participantsFor(task);
     if(!participants.length)continue;
     const defer=(recorded: boolean)=>{
       if(recorded)summary.deferred++;
@@ -113,7 +131,7 @@ export async function runCollection(store: CollectionStore,options: RunOptions={
       (counts[task.provider]??0)>=(store.db.prepare('SELECT per_tick FROM collection_limits WHERE provider=?').get(task.provider) as any).per_tick){
       defer(false);continue;
     }
-    if(!store.claim(task,clock()))continue;
+    if(!store.claim(task,clock(),!!options.retryTask))continue;
     const run=store.begin(task,clock(),null,participants);
     try {
       const result=await execute(store,run,transport(store,run,counts,options.fetchImpl??fetch,sleep,clock,options.requestLimit),clock);

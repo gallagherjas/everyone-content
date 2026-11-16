@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useApi, fmtNum, fmtTime, relTime } from "../api";
 import { Page } from "../components/Layout";
 import { Badge, FilterSelect, Msg, NUM_TONE, VIDEO_BADGES } from "../components/Common";
 import { useNotices } from "../components/Notices";
-import { useCachedLoad } from "../components/PageCache";
+import { useCachedLoad, usePageVisible } from "../components/PageCache";
+import type { BloggerSearchStatus } from "../../../collector/core/bloggers";
+import { searchLabels, searchMessage } from "../labels";
 
-interface BloggerRow {
-  id: number; kind: "blogger" | "blogger_search"; userId?: string; name: string; status: string; note?: string; resolving?: boolean;
+interface BloggerRow extends Partial<BloggerSearchStatus> {
+  id: number; kind: "blogger" | "blogger_search"; userId?: string; name: string; status: string;
   profile?: { secUid: string | null; fans: number | null; likes: number | null; items: number | null; tag1: string | null; tag2: string | null; avatar: string | null; intro?: string };
   options?: { core?: boolean; info?: boolean }; worksCount?: number; lastCollectAt?: string | null;
 }
@@ -30,7 +32,7 @@ function FanBars({ fans }: { fans: Trend["fans"] }) {
 }
 
 export default function BloggersPage() {
-  const api = useApi();
+  const api = useApi(), visible = usePageVisible();
   const [rows, setRows] = useState<BloggerRow[]>([]);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [active, setActive] = useState<string>("");
@@ -46,34 +48,28 @@ export default function BloggersPage() {
   useEffect(() => { setDetail(null); if (active && !active.startsWith("s")) { loadDetail(Number(active)); markBloggerSeen(Number(active)); } }, [active, loadDetail, markBloggerSeen]);
   // 有待解析昵称时轮询，解析完成自动出现博主行。
   useEffect(() => {
-    if (!rows.some(r => r.resolving)) return;
+    if (!visible || !rows.some(r => r.kind === "blogger_search" && r.status === "ready")) return;
     const timer = setTimeout(load, 3000);
     return () => clearTimeout(timer);
-  }, [rows, load]);
-  // 解析成功但作品还没采到（当轮额度被关键词用尽时会顺延）:自动补采一轮,无需用户手动点。
-  const followed = useRef(new Set<number>());
-  useEffect(() => {
-    for (const b of rows.filter(r => r.kind === "blogger" && r.status === "ready" && !r.lastCollectAt && !followed.current.has(r.id))) {
-      followed.current.add(b.id);
-      api("/api/run/collect", { method: "POST", body: JSON.stringify({}) }).catch(() => {});
-    }
-  }, [rows, api]);
+  }, [visible, rows, load]);
   const bloggers = rows.filter(r => r.kind === "blogger"), pending = rows.filter(r => r.kind === "blogger_search");
   const current = bloggers.find(b => String(b.id) === active);
+  const selectedSearch = pending.find(p => `s${p.id}` === active);
   const works = detail?.works ?? [];
   const sortedWorks = workSort === "likes" ? works.slice().sort((a, b) => (b.likes ?? -1) - (a.likes ?? -1)) : works;
   // 进入页面默认选中第一个博主。
-  useEffect(() => { if (!active && bloggers.length) setActive(String(bloggers[0].id)); }, [active, bloggers]);
+  useEffect(() => {
+    if (!current && !selectedSearch) setActive(bloggers.length ? String(bloggers[0].id) : pending.length ? `s${pending[0].id}` : "");
+  }, [current, selectedSearch, bloggers, pending]);
 
   return <Page head="博主" active={active} onPick={setActive} items={[
     ...bloggers.map(b => ({ key: String(b.id), label: <>{b.name}{newCounts.get(b.id) ? <span className="ml-1 text-xs font-medium text-danger">{newCounts.get(b.id)}</span> : null}</> })),
-    ...pending.map(p => ({ key: `s${p.id}`, label: `${p.name}（解析中）` })),
+    ...pending.map(p => ({ key: `s${p.id}`, label: `${p.name}（${searchLabels[p.searchState ?? "queued"]}）` })),
   ]}>
     <div className="space-y-5">
-      {active.startsWith("s") && (
-        <section className="panel"><h3 className="font-semibold text-lg">{pending.find(p => `s${p.id}` === active)?.name}</h3>
-          <p className="mt-2 text-sm text-muted">{pending.find(p => `s${p.id}` === active)?.status === "paused"
-            ? "未找到该昵称的达人；请核对昵称后删除重新添加。" : "昵称解析中：一轮采集完成后自动转为博主，或稍后刷新查看。"}</p>
+      {selectedSearch && (
+        <section className="panel"><h3 className="font-semibold text-lg">{selectedSearch.name}</h3>
+          <p className="mt-2 text-sm text-muted">{searchLabels[selectedSearch.searchState ?? "queued"]}。 {searchMessage(selectedSearch)}</p>
         </section>
       )}
 

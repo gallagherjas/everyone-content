@@ -2,12 +2,15 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { count } from './discovery.ts';
 import { identity } from './projection.ts';
-import type { CollectionStore } from './store.ts';
+import { taskKey, taskRetryable, type CollectionStore } from './store.ts';
+import { sourceBlocker } from './availability.ts';
 import { upsertAuthor,upsertWork,workUrl } from '../../lib/works.ts';
 import { linkWork } from '../../lib/accounts.ts';
 import { parseTime } from '../../lib/time.ts';
 
 export interface BloggerProfile { secUid: string | null; fans: number | null; likes: number | null; items: number | null; tag1: string | null; tag2: string | null; avatar: string | null }
+export type BloggerSearchState = 'queued' | 'running' | 'blocked' | 'failed' | 'deferred' | 'not_found';
+export interface BloggerSearchStatus { searchState: BloggerSearchState; error: string | null; nextRetryAt: number | null }
 export const profileOf = (row: any): Partial<BloggerProfile> => { try { return JSON.parse(row.note||'{}'); } catch { return {}; } };
 
 // author_works 各榜单的每行都是完整对象(标题/赞评转关注/日期/链接)，按 item_id 去重合并并记录上榜榜单。
@@ -78,11 +81,50 @@ export function projectBloggers(store: CollectionStore, a: any): void {
   }
 }
 
+function bloggerJobReader(db: DatabaseSync, accountId: number) {
+  const credential = db.prepare("SELECT scope FROM collection_credentials WHERE account_id=? AND provider='index'").get(accountId);
+  const job = db.prepare(`SELECT t.error,t.disabled,t.lease_until,t.next_run_at,${taskRetryable} retryable,
+    EXISTS(SELECT 1 FROM collection_runs r WHERE r.task_key=t.key AND r.status='ok') succeeded
+    FROM collection_tasks t WHERE t.key=?`);
+  return (row: {kind: string; source_key: string}) => {
+    if (!credential) return undefined;
+    const spec = row.kind === 'blogger_search'
+      ? { type: 'author_search', keyword: row.source_key }
+      : { type: 'author_works', id: row.source_key };
+    return job.get(taskKey('index', String(credential.scope), spec)) as
+      { error: string | null; disabled: number; lease_until: number; next_run_at: number; retryable: number; succeeded: number } | undefined;
+  };
+}
+
+export function hasPendingBloggerWork(db: DatabaseSync, accountId: number, now: number) {
+  const rows = db.prepare("SELECT kind,source_key FROM account_sources WHERE account_id=? AND status='ready' AND kind IN ('blogger_search','blogger')")
+    .all(accountId) as { kind: string; source_key: string }[];
+  if (!rows.length || sourceBlocker(db, accountId, 'index')) return false;
+  const jobFor = bloggerJobReader(db, accountId);
+  return rows.some(row => {
+    const job = jobFor(row);
+    return !job || (!job.disabled && job.lease_until <= now && job.next_run_at <= now &&
+      (row.kind === 'blogger_search' || !job.succeeded));
+  });
+}
+
 /** API 列表视图：登记行 + 概要统计(作品数来自已落库作品，最后采集时间来自最新 works 捕获)。 */
-export function bloggerOverview(db: DatabaseSync, store: CollectionStore, accountId: number): any[] {
-  return (db.prepare("SELECT * FROM account_sources WHERE account_id=? AND kind IN ('blogger','blogger_search') ORDER BY id").all(accountId) as any[])
+export function bloggerOverview(db: DatabaseSync, store: CollectionStore, accountId: number, now = Date.now()): any[] {
+  const rows = db.prepare("SELECT * FROM account_sources WHERE account_id=? AND kind IN ('blogger','blogger_search') ORDER BY id").all(accountId) as any[];
+  const jobFor = bloggerJobReader(db, accountId);
+  const blocked = rows.some(row => row.kind === 'blogger_search') ? sourceBlocker(db, accountId, 'index') : null;
+  return rows
     .map(row => {
-      if (row.kind === 'blogger_search') return { id: row.id, kind: row.kind, name: row.name, status: row.status, note: row.note, resolving: row.status === 'ready' };
+      if (row.kind === 'blogger_search') {
+        const job = jobFor(row);
+        const searchState: BloggerSearchState = row.status === 'paused' ? 'not_found' : blocked ? 'blocked'
+          : job && job.lease_until > now ? 'running' : job?.retryable ? 'failed'
+          : job && job.next_run_at > now ? 'deferred' : 'queued';
+        return { id: row.id, kind: row.kind, name: row.name, status: row.status, note: row.note,
+          searchState, resolving: searchState === 'running', error: blocked ?? job?.error ?? null,
+          nextRetryAt: (searchState === 'failed' || searchState === 'deferred') &&
+            job && !job.disabled && job.next_run_at > now ? job.next_run_at : null };
+      }
       const profile = profileOf(row);
       const works = latestRun(store, accountId, 'author_works', row.source_key);
       const worksCount = profile.secUid
