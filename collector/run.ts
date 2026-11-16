@@ -8,6 +8,7 @@ import { runCollection } from "./core/runner.ts";
 import { registerAuth,configureIndex } from "./core/settings.ts";
 import { collectionOutcome } from "./core/status.ts";
 import { availableProviders } from "./core/availability.ts";
+import { resolveCredentialIdentity } from "../lib/platform-identities.ts";
 
 const args = Object.fromEntries(process.argv.slice(2).map((arg) => { const [key,...value]=arg.replace(/^--/, "").split("="); return [key,value.join("=")||true]; }));
 const db=openDb();
@@ -36,11 +37,14 @@ try {
     console.log(JSON.stringify({accounts:accounts.map(a=>a.id),due}));
   } else {
     const candidates=collectionAccounts(db,options);
-    const accounts=candidates.filter(a =>
-      availableProviders(db,a.id,options.only,options.scheduled && !options.only ? a.config.schedules : undefined).size);
+    const sources=candidates.map(a => ({ account: a, providers: availableProviders(db,a.id,options.only,
+      options.scheduled && !options.only ? a.config.schedules : undefined) })).filter(a => a.providers.size);
+    const accounts=sources.map(a => a.account);
     if(!candidates.length)console.log("没有启用的采集账号，本轮跳过。");
     else if(!accounts.length)throw new Error("没有可用的采集来源。请在「采集 → 连接」检查账号授权与来源状态。");
     else {
+      await Promise.all(sources.flatMap(({account,providers}) => [...providers].map(provider =>
+        resolveCredentialIdentity(db,account.id,provider))));
       const lines: {line:string;ids:number[]}[]=[];
       const runId=Number(process.env.EVERYONE_CONTENT_RUN_ID);
       const result=await runCollection(store,{...options,accountIds:accounts.map(a=>a.id),retryTask:typeof retryTask==='string'?retryTask:undefined,

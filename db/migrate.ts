@@ -1,6 +1,8 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { BEIJING_OFFSET_MS, COLLECTION_DAY_MS, collectionDay, nextCollectionDay, parseCollectionDay } from '../lib/time.ts';
+import { credentialBudgetKey } from '../collector/core/budget.ts';
+import { credentialVersion } from '../collector/core/credential-identity.ts';
 
 function migrateBeijingDays(db: DatabaseSync) {
   const offset = BEIJING_OFFSET_MS / 1000;
@@ -42,12 +44,17 @@ function migrateBeijingDays(db: DatabaseSync) {
   }
 }
 
+const SCHEMA_VERSION = 10;
+
 export function migrate(db: DatabaseSync, _filename: string) {
-  const version = Number(db.prepare('PRAGMA user_version').get()?.user_version);
-  if (version === 9) return;
-  if (![0, 1, 2, 3, 4, 5, 6, 7, 8].includes(version)) throw new Error('数据库版本不兼容，请使用本项目的数据目录');
+  const readVersion = () => Number(db.prepare('PRAGMA user_version').get()?.user_version);
+  if (readVersion() === SCHEMA_VERSION) return;
   db.exec('PRAGMA journal_mode=WAL; BEGIN IMMEDIATE');
   try {
+    const version = readVersion();
+    if (version === SCHEMA_VERSION) { db.exec('COMMIT'); return; }
+    if (!Number.isInteger(version) || version < 0 || version > SCHEMA_VERSION)
+      throw new Error('数据库版本不兼容，请使用本项目的数据目录');
     // v4 及更早：跑基线建表并逐步升到 v4；v4 库只需追平 v5，避免重复执行 v3/v4 重建。
     if (version < 4) {
       for (const name of ['schema.sql', 'accounts.sql', 'collection.sql'])
@@ -176,9 +183,37 @@ export function migrate(db: DatabaseSync, _filename: string) {
       handle TEXT,
       checked_at INTEGER NOT NULL,
       PRIMARY KEY(provider,auth_path)
-    ); PRAGMA user_version=9; COMMIT`);
+    );`);
+    migrateCollectionBudgets(db);
+    db.exec(`PRAGMA user_version=${SCHEMA_VERSION}; COMMIT`);
   } catch (error) {
     db.exec('ROLLBACK');
     throw error;
+  }
+}
+
+function migrateCollectionBudgets(db: DatabaseSync) {
+  db.exec(`CREATE TABLE IF NOT EXISTS collection_daily_limits (
+    provider TEXT NOT NULL REFERENCES collection_limits(provider),
+    budget_key TEXT NOT NULL,
+    daily_limit INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY(provider,budget_key)
+  );`);
+  if (!db.prepare("SELECT 1 FROM pragma_table_info('collection_requests') WHERE name='budget_key'").get()) {
+    db.exec(`ALTER TABLE collection_requests ADD COLUMN budget_key TEXT;
+      DROP INDEX IF EXISTS collection_budget;
+      CREATE INDEX collection_budget ON collection_requests(provider,budget_key,day);`);
+    // 旧请求只记录任务范围。仅为当前有效日内、凭证文件已存在的请求补记额度归属。
+    const day = collectionDay(Date.now());
+    const assign = db.prepare(`UPDATE collection_requests SET budget_key=?
+      WHERE provider=? AND scope=? AND day>=? AND at_ms>=?`);
+    for (const row of db.prepare('SELECT provider,scope,auth_path FROM collection_credentials').all()) {
+      const file = String(row.auth_path), version = credentialVersion(file);
+      if (!version) continue;
+      const provider = String(row.provider);
+      assign.run(credentialBudgetKey(db, provider, file, version), provider, row.scope, day, version.modifiedAt);
+    }
+    db.exec("UPDATE collection_tasks SET error=NULL,next_run_at=0 WHERE error='daily_budget_exhausted'");
   }
 }

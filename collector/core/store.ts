@@ -5,6 +5,7 @@ import { gzipSync, gunzipSync } from 'node:zlib';
 import type { DatabaseSync } from 'node:sqlite';
 import { AUTH_ERROR, COLLECTION_PROVIDERS, SCHEDULE_SCOPES, type CollectionSchedules } from '../../lib/collection-schedule.ts';
 import { COLLECTION_DAY_MS, collectionDay, nextCollectionDay } from '../../lib/time.ts';
+import { credentialBudgetKey, dailyBudget } from './budget.ts';
 
 export const PROVIDERS: readonly string[] = COLLECTION_PROVIDERS;
 interface ScopedTask { provider: string; operation: string }
@@ -110,6 +111,10 @@ export class CollectionStore {
       WHERE r.id=? ORDER BY a.account_id LIMIT 1`).get(runId) as
       { auth_path: string; last_success_at: number | null } | undefined;
   }
+  requestBudgetKey(run: { id: number; provider: string; scope: string }) {
+    const credential = this.credentialForRun(run.id);
+    return (credential && credentialBudgetKey(this.db, run.provider, credential.auth_path)) ?? run.scope;
+  }
   reuse(runId: number, previousId: number, version: string): void {
     atomic(this.db,()=>{
       this.db.prepare("UPDATE collection_runs SET status='cached',version=? WHERE id=?").run(version,runId);
@@ -119,18 +124,18 @@ export class CollectionStore {
   }
   reserve(run: any,endpoint: string,now=Date.now(),sourceKey: string | null=null,parameters: Record<string, unknown>={}): {id: number; wait: number} {
     return atomic(this.db,()=>{
-      const limit=this.db.prepare('SELECT * FROM collection_limits WHERE provider=?').get(run.provider) as any;
+      const {interval_ms}=this.db.prepare('SELECT interval_ms FROM collection_limits WHERE provider=?').get(run.provider) as {interval_ms: number};
       const state=this.db.prepare('SELECT * FROM collection_provider_state WHERE provider=? AND scope=?').get(run.provider,run.scope) as any;
       if(state?.paused)throw new Error('source_paused');
       const previous=(this.db.prepare('SELECT MAX(last_request_at) at FROM collection_provider_state WHERE provider=?').get(run.provider) as any)?.at??0;
-      const at=sourceKey?now:Math.max(now,previous+limit.interval_ms);
+      const at=sourceKey?now:Math.max(now,previous+interval_ms);
       // 距离允许的请求窗口还很久时不占额度不占锁,任务延后到窗口时刻,由下一次采集触发;避免进程内长睡冻结进度并独占采集资源。
       if(!sourceKey&&at-now>600000)throw new Error(`interval_pending ${at}`);
       const day=collectionDay(at);
-      const used=(this.db.prepare('SELECT COUNT(*) n FROM collection_requests WHERE provider=? AND day=?').get(run.provider,day) as any).n;
-      if(used>=limit.daily_limit)throw Object.assign(new Error('daily_budget_exhausted'),{retryAt:nextCollectionDay(at)});
-      const id=Number(this.db.prepare('INSERT INTO collection_requests(run_id,provider,scope,day,at_ms,endpoint,source_key,parameters) VALUES(?,?,?,?,?,?,?,?)')
-        .run(run.id,run.provider,run.scope,day,at,endpoint,sourceKey,JSON.stringify(parameters)).lastInsertRowid);
+      const key=this.requestBudgetKey(run), budget=dailyBudget(this.db,run.provider,key,day);
+      if(budget.used>=budget.daily_limit)throw Object.assign(new Error('daily_budget_exhausted'),{retryAt:nextCollectionDay(at)});
+      const id=Number(this.db.prepare('INSERT INTO collection_requests(run_id,provider,scope,day,at_ms,endpoint,source_key,parameters,budget_key) VALUES(?,?,?,?,?,?,?,?,?)')
+        .run(run.id,run.provider,run.scope,day,at,endpoint,sourceKey,JSON.stringify(parameters),key).lastInsertRowid);
       this.db.prepare(`INSERT INTO collection_provider_state(provider,scope,last_request_at) VALUES(?,?,?)
         ON CONFLICT(provider,scope) DO UPDATE SET last_request_at=MAX(last_request_at,excluded.last_request_at)`).run(run.provider,run.scope,at);
       this.db.prepare('UPDATE collection_tasks SET lease_until=? WHERE key=? AND lease_owner=?').run(at+900000,run.task_key,this.owner);

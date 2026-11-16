@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { defaultSchedules } from '../lib/collection-schedule.ts';
+import { COLLECTION_DAY_MS, collectionDay } from '../lib/time.ts';
 
 // Exercise React with a simulated DOM; no browser or live business API is used.
 test('首个账号由用户创建；页面缓存保留编辑状态，切换账号时隔离且隐藏时停止轮询', async () => {
@@ -56,6 +57,9 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
   const notices = { auth: [], issues: [], bloggers: [] };
   const emptyPlatform = () => ({ configured: false, paused: false, error: null, latest: null, deltaToday: null, delta7d: null, deltaLikes7: null, deltaViews7: null, series: [] });
   const monitorData = { platforms: { douyin: emptyPlatform(), xhs: emptyPlatform(), bili: emptyPlatform() }, total: { fans: 0, deltaToday: null, delta7d: null, platforms: 0 } };
+  const now = Date.now();
+  const daysAgo = offset => collectionDay(now - offset * COLLECTION_DAY_MS);
+  monitorData.platforms.douyin.series = [4, 2, 1].map((offset, i) => ({ at: daysAgo(offset), fans: 100 + i, likes: null, views: null }));
   replace('fetch', async (input, init = {}) => {
     const url = new URL(String(input), window.location.href), account = Number(init.headers?.['x-everyone-content-account'] ?? 0), method = init.method ?? 'GET';
     const body = init.body ? JSON.parse(init.body) : undefined;
@@ -168,6 +172,11 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     assert.equal(count('/api/collection'), 1); assert.equal(count('/api/monitor'), 0);
     assert.equal(timers.size, 1);
     await navigate('数据'); assert.equal(timers.size, 0);
+    const trend = visible('[data-date]');
+    assert.equal(trend.length, 30);
+    assert.equal(trend[0].dataset.date, daysAgo(29));
+    assert.equal(trend.at(-1).dataset.date, daysAgo(0));
+    assert.deepEqual(trend.filter(day => day.childElementCount > 0).map(day => day.dataset.date), [daysAgo(1)]);
     const monitorLoads = count('/api/monitor'); assert.equal(monitorLoads, 1);
     window.scrollTo(0, 420);
     await navigate('采集'); await click('定时');

@@ -5,6 +5,8 @@ import { atomic,freshSnapshots,taskKey,taskInScope,scheduledTaskEnabled, type Co
 import { parseJson } from '../../lib/json.ts';
 import { COLLECTION_SCOPES, type CollectionProvider } from '../../lib/collection-schedule.ts';
 import { availableProviders } from './availability.ts';
+import { credentialBinding } from './settings.ts';
+import { credentialBudgetKey } from './budget.ts';
 import { COLLECTION_DAY_MS, collectionDay, collectionDayStart, nextCollectionDay, parseCollectionDay } from '../../lib/time.ts';
 
 import { planCollection } from './planner.ts';
@@ -87,7 +89,7 @@ export async function runCollection(store: CollectionStore,options: RunOptions={
     const urgency=(t: any)=>t.priority+Math.log1p(Math.max(0,clock()-t.next_run_at)/HOUR);
     return Math.floor(b.priority/10)-Math.floor(a.priority/10)||fairness(a)-fairness(b)||urgency(b)-urgency(a)||a.next_run_at-b.next_run_at;
   };
-  const exhausted=new Set<string>(),summary={completed:0,cached:0,failed:0,deferred:0,requests:counts,
+  const exhausted=new Set<string>(),dailyExhausted=new Map<string,Set<string>>(),summary={completed:0,cached:0,failed:0,deferred:0,requests:counts,
     accounts:Object.fromEntries(ids.map(id=>[id,{completed:0,cached:0,failed:0,deferred:0}]))};
   // 点单个平台时展示当日缓存，已到换日的任务走正常领取与请求。
   if(!options.retryTask&&!options.scheduled&&options.only&&Object.hasOwn(SNAPSHOT_PLATFORMS,options.only)){
@@ -127,7 +129,10 @@ export async function runCollection(store: CollectionStore,options: RunOptions={
       if(recorded)summary.deferred++;
       for(const id of participants)summary.accounts[id].deferred++;
     };
-    if(exhausted.has(task.provider) || Object.values(counts).reduce((a,b)=>a+b,0)>=(options.requestLimit??Infinity) ||
+    const dailyKeys=dailyExhausted.get(task.provider);
+    const credential=dailyKeys && credentialBinding(store.db,participants[0],task.provider);
+    const dailyKey=(credential && credentialBudgetKey(store.db,task.provider,credential.auth_path)) ?? task.scope;
+    if(dailyKeys?.has(dailyKey) || exhausted.has(task.provider) || Object.values(counts).reduce((a,b)=>a+b,0)>=(options.requestLimit??Infinity) ||
       (counts[task.provider]??0)>=(store.db.prepare('SELECT per_tick FROM collection_limits WHERE provider=?').get(task.provider) as any).per_tick){
       defer(false);continue;
     }
@@ -171,7 +176,13 @@ export async function runCollection(store: CollectionStore,options: RunOptions={
         store.db.prepare("UPDATE collection_runs SET status='deferred',error=? WHERE id=?").run(code,run.id);
         const retryAt=(error as {retryAt?:number})?.retryAt;
         const next=code==='daily_budget_exhausted' ? retryAt??nextCollectionDay(clock()) : clock()+300000;
-        store.release(task,next,code);exhausted.add(task.provider);defer(true);
+        store.release(task,next,code);
+        if(code==='daily_budget_exhausted'){
+          const keys=dailyKeys??new Set<string>();
+          keys.add(store.requestBudgetKey(run));
+          dailyExhausted.set(task.provider,keys);
+        }else exhausted.add(task.provider);
+        defer(true);
       }else{store.fail(run,code,clock());summary.failed++;for(const id of participants)summary.accounts[id].failed++;if(code==='service_unavailable')exhausted.add(task.provider);}
       options.log?.(`${task.provider}/${task.operation} ${task.target}：${code}`,participants);
     }

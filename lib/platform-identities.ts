@@ -1,4 +1,3 @@
-import { statSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import { loadAuth } from '../collector/sources/douyin-index/client.ts';
 import { loadSession } from '../collector/sources/platform/session.ts';
@@ -6,36 +5,26 @@ import { fetchPlatformIdentity, type PlatformIdentity } from '../collector/sourc
 import { credentialBinding } from '../collector/core/settings.ts';
 import type { CollectionProvider } from './collection-schedule.ts';
 import { connectionStatus } from '../collector/core/availability.ts';
-
-function credentialRevision(file: string) {
-  try {
-    const { dev, ino, size, mtimeNs, ctimeNs } = statSync(file, { bigint: true });
-    return [dev, ino, size, mtimeNs, ctimeNs].join(':');
-  } catch { return null; }
-}
-
-function identityRecord(db: DatabaseSync, provider: CollectionProvider, file: string, revision: string) {
-  return db.prepare(`SELECT platform_account_id id,nickname name,handle,checked_at
-    FROM collection_credential_identities WHERE provider=? AND auth_path=? AND revision=?`).get(provider, file, revision) as
-    (Omit<PlatformIdentity, 'id'> & { id: string | null; checked_at: number }) | undefined;
-}
-
-export function credentialIdentity(db: DatabaseSync, provider: CollectionProvider, file: string): PlatformIdentity | null {
-  const revision = credentialRevision(file);
-  const row = revision && identityRecord(db, provider, file, revision);
-  return row && row.id ? { id: row.id, name: row.name, handle: row.handle } : null;
-}
+import { credentialIdentity, credentialVersion, identityRecord } from '../collector/core/credential-identity.ts';
+import { atomic } from '../collector/core/store.ts';
+import { moveSessionBudget, platformBudgetKey, sessionBudgetKey } from '../collector/core/budget.ts';
 
 function recordIdentity(db: DatabaseSync, provider: CollectionProvider, file: string, revision: string, identity: PlatformIdentity | null) {
-  db.prepare(`INSERT INTO collection_credential_identities VALUES(?,?,?,?,?,?,?)
-    ON CONFLICT(provider,auth_path) DO UPDATE SET revision=excluded.revision,
-    platform_account_id=excluded.platform_account_id,nickname=excluded.nickname,handle=excluded.handle,checked_at=excluded.checked_at`)
-    .run(provider, file, revision, identity?.id ?? null, identity?.name ?? null, identity?.handle ?? null, Date.now());
+  atomic(db, () => {
+    db.prepare(`INSERT INTO collection_credential_identities VALUES(?,?,?,?,?,?,?)
+      ON CONFLICT(provider,auth_path) DO UPDATE SET revision=excluded.revision,
+      platform_account_id=excluded.platform_account_id,nickname=excluded.nickname,handle=excluded.handle,checked_at=excluded.checked_at`)
+      .run(provider, file, revision, identity?.id ?? null, identity?.name ?? null, identity?.handle ?? null, Date.now());
+    if (identity) moveSessionBudget(db, provider, revision, platformBudgetKey(identity.id));
+  });
 }
 
 export function copyCredentialIdentity(db: DatabaseSync, provider: CollectionProvider, from: string, to: string) {
-  const identity = credentialIdentity(db, provider, from), revision = credentialRevision(to);
-  if (identity && revision) recordIdentity(db, provider, to, revision, identity);
+  const source = credentialVersion(from), target = credentialVersion(to);
+  if (!source || !target) return;
+  const identity = credentialIdentity(db, provider, from);
+  if (identity) recordIdentity(db, provider, to, target.revision, identity);
+  else moveSessionBudget(db, provider, source.revision, sessionBudgetKey(target.revision));
 }
 
 export function removeUnusedCredentialIdentities(db: DatabaseSync) {
@@ -51,7 +40,7 @@ export async function resolveCredentialIdentity(db: DatabaseSync, accountId: num
   identify = fetchPlatformIdentity) {
   const credential = credentialBinding(db, accountId, provider);
   if (!credential) return;
-  const file = credential.auth_path, revision = credentialRevision(file);
+  const file = credential.auth_path, revision = credentialVersion(file)?.revision;
   if (!revision) return;
   const cached = identityRecord(db, provider, file, revision);
   if (cached?.id || cached && Date.now() - cached.checked_at < FAILED_RETRY_MS) return;
@@ -66,7 +55,7 @@ export async function resolveCredentialIdentity(db: DatabaseSync, accountId: num
     try { auth = provider === 'index' ? loadAuth(file, {}) : loadSession(file); }
     catch { return; }
     const identity = await identify(provider, auth).catch(() => null);
-    if (revision === credentialRevision(file) &&
+    if (revision === credentialVersion(file)?.revision &&
       db.prepare('SELECT 1 FROM collection_credentials WHERE provider=? AND auth_path=?').get(provider, file))
       recordIdentity(db, provider, file, revision, identity);
   };

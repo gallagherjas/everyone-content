@@ -4,14 +4,21 @@ import { SCHEDULE_SCOPES, latestScheduleSlot, providerForScope } from './collect
 import { sourceBlocker } from '../collector/core/availability.ts';
 import { hasPendingBloggerWork } from '../collector/core/bloggers.ts';
 import { collectionDay } from './time.ts';
+import { credentialBinding } from '../collector/core/settings.ts';
+import { credentialBudgetKey, dailyBudget } from '../collector/core/budget.ts';
 
 export interface CollectionLaunch { only?: string; scheduled?: boolean; limit?: number; retryTask?: string }
 
 export function pendingBloggerAccount(db: DatabaseSync, now = Date.now()) {
-  const budget = db.prepare(`SELECT l.daily_limit,(SELECT COUNT(*) FROM collection_requests
-    WHERE provider='index' AND day=?) used FROM collection_limits l WHERE l.provider='index'`).get(collectionDay(now));
-  if (!budget || Number(budget.used) >= Number(budget.daily_limit)) return undefined;
-  return listAccounts(db).find(a => a.status === 'active' && hasPendingBloggerWork(db, a.id, now))?.id;
+  const day = collectionDay(now);
+  return listAccounts(db).find(a => {
+    if (a.status !== 'active' || !hasPendingBloggerWork(db, a.id, now)) return false;
+    const credential = credentialBinding(db, a.id, 'index');
+    const key = credential && credentialBudgetKey(db, 'index', credential.auth_path);
+    if (!key) return false;
+    const budget = dailyBudget(db, 'index', key, day);
+    return budget.used < budget.daily_limit;
+  })?.id;
 }
 
 export function runScheduledCollection(

@@ -5,7 +5,7 @@ import { collectionNames, names } from '../labels';
 import { CollectionRow } from './CollectionControls';
 import { Msg, Toggle } from './Common';
 
-export interface Budget { provider: string; daily_limit: number; used: number }
+export interface Budget { provider: string; daily_limit: number; used: number; account_name?: string | null }
 
 function TimeSelect({ name, times, disabled, onChange }: {
   name: string; times: string[]; disabled: boolean; onChange: (times: string[]) => void;
@@ -71,13 +71,13 @@ export default function CollectionSchedule({ account, onSaved, budgets, credenti
   const commitLimit = (provider: CollectionProvider, budget?: Budget) => {
     const value = Number(limitDrafts[provider]);
     setLimitDrafts(current => { const { [provider]: _, ...rest } = current; return rest; });
-    if (disabled || !budget || !Number.isInteger(value) || value < 1 || value > 10000 || value === budget.daily_limit) return;
+    if (disabled || !credentials?.[provider] || !budget || !Number.isInteger(value) || value < 1 || value > 10000 || value === budget.daily_limit) return;
     api('/api/collection/limits', { method: 'PUT', body: JSON.stringify({ provider, daily_limit: value }) })
       .then(() => setMessage({ text: '每日上限已更新。', failed: false }))
       .catch(error => setMessage({ text: String(error), failed: true }));
   };
   const dailyLimit = (provider: CollectionProvider) => {
-    const budget = budgets?.find(b => b.provider === provider);
+    const budget = credentials?.[provider] ? budgets?.find(b => b.provider === provider) : undefined;
     return <label className="flex shrink-0 items-center gap-2 text-sm">
       <span className="text-xs text-muted">已用 {budget?.used ?? '—'}</span>
       <span>每日上限</span>
@@ -120,11 +120,11 @@ export default function CollectionSchedule({ account, onSaved, budgets, credenti
     </CollectionRow>;
   };
   return <form onSubmit={save} className="space-y-3">
-    <p className="text-xs text-muted">运行时间为北京时间。每日额度按来源跨账号共用，00:00 重置。</p>
+    <p className="text-xs text-muted">运行时间为北京时间。每日上限适用于当前连接的平台帐号。</p>
     <fieldset disabled={disabled} className="space-y-5">
       <div className="space-y-2">
         <h3 className="text-base font-semibold">抖音指数采集</h3>
-        <CollectionRow label="抖音指数共享额度">{dailyLimit('index')}</CollectionRow>
+        <CollectionRow label="抖音指数额度">{dailyLimit('index')}</CollectionRow>
         {indexScopes.map(scheduleRow)}
       </div>
       <div className="space-y-2 border-t border-line pt-4">

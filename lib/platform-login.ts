@@ -17,7 +17,8 @@ import { fetchPlatformIdentity, platformAccountLabel } from '../collector/source
 import { connectionStatus } from '../collector/core/availability.ts';
 import { COLLECTION_PROVIDER_NAMES, type CollectionProvider } from './collection-schedule.ts';
 import { indexSessionDetails, reuseIndexSession, saveIndexSession } from './index-sessions.ts';
-import { credentialIdentity, resolveCredentialIdentity } from './platform-identities.ts';
+import { credentialIdentity } from '../collector/core/credential-identity.ts';
+import { resolveCredentialIdentity } from './platform-identities.ts';
 
 const running = (status: string) => status === 'preparing' || status === 'waiting';
 const messages: Record<string, string> = {

@@ -57,7 +57,7 @@ npm run collection:plan -- --account=42 --auth="/你的私有目录/指数授权
 
 ## 请求上限与定时
 
-采集日和每日额度每天北京时间 00:00 换日。指数的每日采集次数上限由所有账号共享，默认每天 30 次。失败请求也计入次数。请求间隔至少 2 秒，每轮最多 10 次。
+采集日和每日额度每天北京时间 00:00 换日。「采集 → 总览」按各来源当前登录的平台帐号显示用量。同一来源的同一平台帐号共用额度，登录不同平台帐号分别计数。可在「采集 → 定时」设置当前登录帐号的每日上限。抖音指数默认每天 30 次，失败请求也计入次数。请求间隔至少 2 秒，每轮最多 10 次。
 
 创作后台快照各平台独立限额：每天 10 次、请求间隔 1 小时、每轮 1 次。同一采集日手动再次采集同一后台时复用快照。未到请求间隔时任务标记延后并释放采集资源，到点后由下一次采集补上。
 
@@ -89,6 +89,7 @@ npm run collection:plan -- --account=42 --auth="/你的私有目录/指数授权
 | `GET /api/collection/config` 或 `PUT /api/collection/config` | 从 GET 返回的 `config` 读取设置。排除词字段为 `config.index.discovery.excludeKeywords`。首次保存时将 `config.index.discovery` 设为 `{}`，服务会补齐默认值。编辑 `config.index` 或 `config.schedules` 后，将修改后的完整对象放到 PUT 请求体同名顶层字段。 |
 | `POST /api/run/collect` | 手动运行到期任务，请求体留空采所有可用来源，或提交 `{"only":"<范围>"}`。`topic_rank` 采话题榜，`video_rank` 采视频榜，`author` 采博主追踪，`douyin`/`xhs`/`bili` 采对应平台快照。`index` 采整个抖音指数，旧版 `topic` 仍可合并采话题榜和视频榜。响应包含 `run_id`。 |
 | `GET /api/collection` | 读取采集记录 `runs`、任务 `tasks` 及其 `status`、队列计数 `queue`、每日采集次数上限及发现结果。`blockers` 返回各来源的阻塞原因，可用来源对应 `null`。 |
+| `PUT /api/collection/limits` | 修改指定来源当前登录帐号的每日采集次数上限，提交 `{"provider":"index","daily_limit":30}`。 |
 | `GET /api/collection/progress?run_id=<轮次编号>` | 读取指定轮次的进度和状态。结束后的 `status` 为完成 `done`、部分失败 `partial`、失败 `failed`、已有结果且部分延后 `done_with_deferred`、延后 `deferred`、复用缓存 `cached` 或无可执行任务 `empty`。省略编号时返回当前账号最近一轮。 |
 | `GET /api/collection/records/:id` 或 `GET /api/collection/records/:id/raw` | 用采集记录编号读取本次入库数据或原始响应。 |
 | `POST /api/collection/records/:id/retry` | 重试当前账号的一条失败记录，响应包含 `run_id`。 |

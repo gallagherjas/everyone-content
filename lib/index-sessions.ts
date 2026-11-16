@@ -10,7 +10,8 @@ import { bindCredential, credentialBinding, registerAuth, resumeSource } from '.
 import { loadAuth, type IndexAuth } from '../collector/sources/douyin-index/client.ts';
 import { writePrivateAuth } from '../collector/sources/platform/session.ts';
 import { platformAccountLabel } from '../collector/sources/platform/identity.ts';
-import { copyCredentialIdentity, credentialIdentity, removeUnusedCredentialIdentities } from './platform-identities.ts';
+import { credentialIdentity } from '../collector/core/credential-identity.ts';
+import { copyCredentialIdentity, removeUnusedCredentialIdentities } from './platform-identities.ts';
 
 const sessionFolder = (directory: string) => join(directory, 'authorization', 'index-sessions');
 const managedFile = (file: string, directory: string) => dirname(dirname(file)) === sessionFolder(directory)

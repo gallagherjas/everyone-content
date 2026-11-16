@@ -4,6 +4,10 @@ import { freshSnapshots, taskKey, type CollectionStore } from './store.ts';
 import { collectionBlockers } from './availability.ts';
 import { collectionDay, collectionDayStart } from '../../lib/time.ts';
 import { indexEffectiveVersion, usesTopicDates, type TopicDates } from '../sources/douyin-index/protocol.ts';
+import { credentialBudgetKey, dailyBudget } from './budget.ts';
+import { credentialIdentity } from './credential-identity.ts';
+import { platformAccountLabel } from '../sources/platform/identity.ts';
+import { COLLECTION_PROVIDERS } from '../../lib/collection-schedule.ts';
 
 export type CollectionOutcome = 'done' | 'partial' | 'failed' | 'done_with_deferred' | 'deferred' | 'cached' | 'empty';
 export function collectionOutcome({ completed, cached, failed, deferred }: Record<'completed' | 'cached' | 'failed' | 'deferred', number>): CollectionOutcome {
@@ -66,10 +70,15 @@ export function collectionStatus(db: DatabaseSync,a: any,store: CollectionStore 
     return indexEffectiveVersion(task.operation,today,dates.get(key))===today_version ? {...task,status:'collected' as const} : task;
   });
   const runs=collectionRuns(db,a.id);
-  const budgets=db.prepare(`SELECT l.provider,l.daily_limit,l.per_tick,(SELECT COUNT(*) FROM collection_requests q WHERE q.provider=l.provider AND q.day=?) used
-    FROM collection_limits l ORDER BY l.provider`).all(today) as any[];
+  const bindings=new Map(db.prepare('SELECT provider,auth_path FROM collection_credentials WHERE account_id=?').all(a.id)
+    .map(row=>[String(row.provider),String(row.auth_path)]));
+  const budgets=[...COLLECTION_PROVIDERS].sort().map(provider=>{
+    const file=bindings.get(provider), key=file ? credentialBudgetKey(db,provider,file) : null;
+    const {daily_limit,per_tick,used}=dailyBudget(db,provider,key,today);
+    return {provider,daily_limit,per_tick,used,account_name:file ? platformAccountLabel(credentialIdentity(db,provider,file)) : null};
+  });
   let discovery=null;
-  const credentials=Object.fromEntries((db.prepare('SELECT provider FROM collection_credentials WHERE account_id=?').all(a.id) as any[]).map(r=>[r.provider,true]));
+  const credentials=Object.fromEntries([...bindings.keys()].map(provider=>[provider,true]));
   if(store&&(credentials.index||db.prepare(`SELECT 1 FROM collection_run_accounts x
     JOIN collection_runs r ON r.id=x.run_id
     WHERE x.account_id=? AND r.provider='index' AND r.status='ok' LIMIT 1`).get(a.id)))

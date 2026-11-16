@@ -3,6 +3,7 @@ import { useApi, fmtNum } from "../api";
 import { Badge, type BadgeTone } from "../components/Common";
 import { useCachedLoad } from "../components/PageCache";
 import { Sparkline } from "../components/Sparkline";
+import { COLLECTION_DAY_MS, collectionDay } from "../../../lib/time";
 
 type Provider = "douyin" | "xhs" | "bili";
 const META: Record<Provider, { label: string; color: string }> = {
@@ -12,6 +13,7 @@ const META: Record<Provider, { label: string; color: string }> = {
 };
 // 速览行的结论类别色
 const INSIGHT_TONES: Record<string, BadgeTone> = {};
+const NET_TREND_DAYS = 30;
 
 interface Point { at: string; fans: number | null; likes: number | null; views: number | null }
 interface PlatformData {
@@ -58,7 +60,7 @@ function NetAddChart({ rows, dates, labels }: {
   const active = pinned ?? hover;
   const show = active != null ? {
     idx: active, at: dates[active],
-    segs: rows.map(r => ({ key: r.key, color: r.color, label: labels[r.key], v: r.values[active] ?? 0 })).filter(s => s.v > 0),
+    segs: rows.map(r => ({ key: r.key, color: r.color, label: labels[r.key], v: r.values[active] })).filter(s => s.v != null),
   } : null;
   const ticks = dates.length > 6
     ? Array.from({ length: 6 }, (_, n) => Math.round(n * (dates.length - 1) / 5))
@@ -70,12 +72,10 @@ function NetAddChart({ rows, dates, labels }: {
         {dates.map((at, d) => {
           const segs = rows.map(r => ({ ...r, v: r.values[d] ?? 0 })).filter(s => s.v > 0);
           const isActive = active === d;
-          return <div key={at} title={undefined}
+          return <div key={at} data-date={at}
             className={`flex min-w-0 flex-1 cursor-pointer flex-col justify-end gap-[2px] self-stretch transition-opacity ${active != null && !isActive ? "opacity-50" : ""}`}
             onMouseEnter={() => setHover(d)} onClick={() => setPinned(pinned === d ? null : d)}>
-            {segs.length
-              ? segs.map(s => <div key={s.key} className="w-full rounded-[3px]" style={{ height: `${(s.v / max) * 100}%`, background: `linear-gradient(180deg, ${s.color}, ${s.color}8C)` }} />)
-              : <div className="w-full bg-ink/[0.04]" style={{ height: 2 }} />}
+            {segs.map(s => <div key={s.key} className="w-full rounded-[3px]" style={{ height: `${(s.v / max) * 100}%`, background: `linear-gradient(180deg, ${s.color}, ${s.color}8C)` }} />)}
           </div>;
         })}
       </div>
@@ -101,10 +101,10 @@ function NetAddChart({ rows, dates, labels }: {
           ? show.segs.map(s => (
             <p key={s.key} className="mt-1 flex items-center gap-1.5 text-muted">
               <span className="inline-block h-2 w-2 rounded-sm" style={{ background: s.color }} />
-              {s.label} <span className="text-ink">+{fmtNum(s.v)}</span>
+              {s.label} <span className="text-ink">{signedText(s.v)}</span>
             </p>
           ))
-          : <p className="mt-1 text-muted">当日无快照</p>}
+          : <p className="mt-1 text-muted">暂无当日净增数据</p>}
       </div>
     )}
   </div>;
@@ -120,16 +120,18 @@ export default function MonitorPage() {
   if (error) return <p className="text-sm text-danger">{error}</p>;
   if (!data) return <p className="text-sm text-muted">正在加载监控数据…</p>;
   const platforms = (Object.keys(META) as Provider[]).map(key => ({ key, ...data.platforms[key] }));
-  // 每日净增:各平台当日粉丝 - 前一日粉丝,按北京自然日对齐;首日与前向缺口为空。
-  const netDates = [...new Set(platforms.flatMap(p => p.series.map(s => s.at)))].sort();
-  const netRows = platforms.map(p => ({
-    key: p.key, color: META[p.key].color,
-    values: netDates.map(at => {
-      const idx = p.series.findIndex(s => s.at === at);
-      const cur = idx >= 0 ? p.series[idx].fans : null, prev = idx > 0 ? p.series[idx - 1].fans : null;
+  const now = Date.now();
+  const days = Array.from({ length: NET_TREND_DAYS + 1 }, (_, i) =>
+    collectionDay(now - (NET_TREND_DAYS - i) * COLLECTION_DAY_MS));
+  const netDates = days.slice(1);
+  const netRows = platforms.map(p => {
+    const fansByDay = new Map(p.series.map(s => [s.at, s.fans]));
+    const values = netDates.map((at, i) => {
+      const cur = fansByDay.get(at), prev = fansByDay.get(days[i]);
       return cur == null || prev == null ? null : cur - prev;
-    }),
-  }));
+    });
+    return { key: p.key, color: META[p.key].color, values };
+  });
   // 对比表衍生指标:周增长率(净增÷期初粉丝)与动量(本 7 天净增 - 上个 7 天净增)。
   const rows = platforms.map(p => {
     const s = p.series, i = s.length - 1;
@@ -154,7 +156,11 @@ export default function MonitorPage() {
   };
   const totalWinFans = rows.reduce((n, r) => { const d = winDelta(r, "fans"); return d == null ? n : n + d; }, 0);
   // 数据速览从日快照计算，动态数值和平台名用墨色强调。
-  const netTotals = netDates.map((at, d) => ({ at, total: netRows.reduce((n, r) => n + (r.values[d] ?? 0), 0) }));
+  const netTotals = netDates.map((at, d) => {
+    const values = netRows.map(r => r.values[d]).filter(v => v != null);
+    return { at, hasData: values.length > 0, total: values.reduce((sum, value) => sum + value, 0) };
+  });
+  const recentWeeks = netTotals.slice(-14);
   const down = netTotals.filter(x => x.total < 0);
   const worstDown = down.length ? down.reduce((a, b) => b.total < a.total ? b : a) : null;
   const eff = platforms
@@ -163,15 +169,15 @@ export default function MonitorPage() {
   const likeBest = eff.length ? eff.slice().sort((a, b) => b.perLike - a.perLike)[0] : null;
   const viewBest = eff.length ? eff.slice().sort((a, b) => b.perView - a.perView)[0] : null;
   const insightRows: { tag: string; tone: BadgeTone; text: ReactNode }[] = [
-    netTotals.length >= 14
+    recentWeeks.every(day => day.hasData)
       ? (() => {
-        const cur = netTotals.slice(-7).reduce((n, x) => n + x.total, 0);
-        const prev = netTotals.slice(-14, -7).reduce((n, x) => n + x.total, 0);
+        const cur = recentWeeks.slice(7).reduce((n, x) => n + x.total, 0);
+        const prev = recentWeeks.slice(0, 7).reduce((n, x) => n + x.total, 0);
         const up = cur >= prev;
         const pct = prev !== 0 ? (Math.abs(cur - prev) / Math.abs(prev) * 100).toFixed(1) : null;
         return { tag: "环比", tone: (up ? "brand" : "danger") as BadgeTone, text: <>全平台近7天净增 <Em>{signedText(cur)}</Em>，上个7天 <Em>{signedText(prev)}</Em>{pct ? <>，环比<Em>{up ? "加速" : "放缓"} {pct}%</Em></> : null}。</> };
       })()
-      : { tag: "环比", tone: "gray", text: "快照积累满 14 天后提供环比结论。" },
+      : { tag: "环比", tone: "gray", text: "近 14 天净增数据齐备后提供环比结论。" },
     likeBest && viewBest
       ? { tag: "回报", tone: "violet", text: likeBest.key === viewBest.key
         ? <>内容回报<Em>{META[likeBest.key].label}最好</Em>：篇均获赞 <Em>{fmtNum(Math.round(likeBest.perLike))}</Em>、篇均播放 <Em>{fmtNum(Math.round(viewBest.perView))}</Em>。</>
@@ -179,7 +185,7 @@ export default function MonitorPage() {
       : { tag: "回报", tone: "violet", text: "暂无内容数据。" },
     worstDown
       ? { tag: "回落", tone: "warn", text: <>近30天有 <Em>{down.length}</Em> 天粉丝净回落，最深的一天是 <Em>{worstDown.at.slice(5)}（{fmtNum(worstDown.total)}）</Em>。</> }
-      : { tag: "回落", tone: "warn", text: "近30天无粉丝净回落。" },
+      : { tag: "回落", tone: "warn", text: netTotals.some(day => day.hasData) ? "近30天无粉丝净回落。" : "暂无净增数据。" },
     peak && peak.total > 0
       ? (() => {
         const day = netRows.find(r => r.key === peak!.key);
@@ -200,7 +206,7 @@ export default function MonitorPage() {
         </div>
         <div>
           <div className="mb-3 flex items-center justify-between text-xs text-muted">
-            <span>每日净增 · 近30天</span>
+            <span>每日净增 · 近{NET_TREND_DAYS}天</span>
             <span className="flex gap-3">{platforms.map(p => (
               <span key={p.key} className="flex items-center gap-1">
                 <span className="inline-block h-2 w-2 rounded-sm" style={{ background: META[p.key].color }} />

@@ -147,6 +147,7 @@ test('账号隔离、画像生效与指数配置可通过本地API完成', async
     await request('/api/collection/records/1/retry', second.id, 'POST', undefined, 404);
     await request('/api/collection/progress?run_id=1', second.id, 'GET', undefined, 404);
     await request('/api/collection/limits', second.id, 'PUT', { provider: 'unsupported', daily_limit: 1 }, 400);
+    await request('/api/collection/limits', second.id, 'PUT', { provider: 'index', daily_limit: 1 }, 409);
     const invalid = { ...second.config.schedules, unsupported: { enabled: true, times: ['10:00'], request_limit: 1 } };
     await request('/api/collection/config', second.id, 'PUT', { schedules: invalid }, 400);
     const db = new DatabaseSync(filename);
@@ -166,6 +167,11 @@ test('账号隔离、画像生效与指数配置可通过本地API完成', async
         .run(first.id, 'index', original, `account:${first.id}`);
       await resolveCredentialIdentity(bindings, first.id, 'index', async () =>
         ({ id: 'MS4wLjAB-test', name: '指数测试帐号', handle: null }));
+      await request('/api/collection/limits', first.id, 'PUT', { provider: 'index', daily_limit: 7 });
+      const dailyLimit = async (id: number) => (await request('/api/collection', id)).budgets
+        .find((row: any) => row.provider === 'index').daily_limit;
+      assert.equal(await dailyLimit(first.id), 7);
+      assert.equal(await dailyLimit(second.id), 30);
       const choices = (await request('/api/auth/index', second.id)).reuse_accounts;
       assert.deepEqual(choices, [{ id: first.id, name: first.name, account_name: '指数测试帐号' }]);
       assert.match((await request('/api/auth/index/reuse', second.id, 'POST', { source_account_id: second.id }, 400)).error, /其他帐号/);
@@ -173,6 +179,7 @@ test('账号隔离、画像生效与指数配置可通过本地API完成', async
       assert.deepEqual(state.session_accounts, [first.name, second.name]);
       assert.equal(state.account_name, '指数测试帐号');
       assert.equal(state.reuse_accounts.length, 0);
+      assert.equal(await dailyLimit(second.id), 7);
       assert.ok(!JSON.stringify(state).includes('synthetic-index-session'));
       const linked = bindings.prepare("SELECT scope,auth_path FROM collection_credentials WHERE provider='index' ORDER BY account_id").all();
       sharedFile = String(linked[0].auth_path);

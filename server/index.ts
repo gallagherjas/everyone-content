@@ -32,6 +32,7 @@ import { PlatformLoginManager, LOGIN_PLATFORMS } from '../lib/platform-login.ts'
 import { monitorOverview } from '../lib/monitor.ts';
 import { noticeOverview } from '../lib/notices.ts';
 import { CollectionStore, PROVIDERS, atomic } from '../collector/core/store.ts';
+import { credentialBudgetKey } from '../collector/core/budget.ts';
 import { AUTH_ERROR, COLLECTION_PROVIDERS, COLLECTION_PROVIDER_NAMES, COLLECTION_SCOPES, providerForScope, type CollectionProvider } from '../lib/collection-schedule.ts';
 import { availableProviders, sourceBlocker } from '../collector/core/availability.ts';
 import { credentialBinding, resumeSource } from '../collector/core/settings.ts';
@@ -298,7 +299,12 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
     if (!PROVIDERS.includes(b.provider)) throw new InputError('采集来源无效');
     if (!Number.isInteger(b.daily_limit) || b.daily_limit < 1 || b.daily_limit > 10000)
       throw new InputError('每日采集次数上限须为1–10000的整数');
-    db.prepare('UPDATE collection_limits SET daily_limit=? WHERE provider=?').run(b.daily_limit, b.provider);
+    const credential = credentialBinding(db, id, b.provider);
+    const key = credential && credentialBudgetKey(db, b.provider, credential.auth_path);
+    if (!key) throw new InputError('请先连接采集来源', 409);
+    db.prepare(`INSERT INTO collection_daily_limits(provider,budget_key,daily_limit,updated_at) VALUES(?,?,?,?)
+      ON CONFLICT(provider,budget_key) DO UPDATE SET daily_limit=excluded.daily_limit,updated_at=excluded.updated_at`)
+      .run(b.provider, key, b.daily_limit, Date.now());
     return json(res, { ok: true });
   }
   const collectionRecord = path.match(/^\/api\/collection\/records\/(\d+)(?:\/(raw|retry))?$/);

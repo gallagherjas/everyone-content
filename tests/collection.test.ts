@@ -20,6 +20,7 @@ const {monitorOverview}=await import('../lib/monitor.ts');
 const {bloggerOverview,bloggerDetail}=await import('../collector/core/bloggers.ts');
 const {pendingBloggerAccount}=await import('../lib/collection-scheduler.ts');
 const {reuseIndexSession,saveIndexSession}=await import('../lib/index-sessions.ts');
+const {resolveCredentialIdentity}=await import('../lib/platform-identities.ts');
 const {defaultSchedules}=await import('../lib/collection-schedule.ts');
 const DAY=86400000,HOUR=3600000,base=Date.UTC(2026,10,7,2);
 function setup(){const db=new DatabaseSync(':memory:');migrate(db,':memory:');createAccount(db,'采集测试账号');db.prepare('UPDATE collection_limits SET interval_ms=0').run();return {db,store:new CollectionStore(db,join(root,hash(Math.random()))) };}
@@ -180,6 +181,7 @@ test('跨午夜预留请求时按实际预留日计算额度和下一次可采�
   const second=createAccount(db,'同平台另一账号');
   const file=join(root,'quota-midnight.json');writeFileSync(file,JSON.stringify({cookie:'ok'}),{mode:0o600});
   registerAuth(store,1,file,'xhs');
+  registerAuth(store,second.id,file,'xhs');
   db.prepare("UPDATE collection_limits SET interval_ms=60000,daily_limit=1 WHERE provider='xhs'").run();
   const midnight=Date.UTC(2026,10,15,16);
   const other=store.queue('xhs',`account:${second.id}`,{type:'account_snapshot'},[{id:second.id,configSha:'test'}]);
@@ -274,6 +276,9 @@ test('迁移旧采集日：凌晨额度、快照与日期检查移入北京时�
   const now=Date.UTC(2026,10,15,16,30);
   const oldBoundary=Date.UTC(2026,10,16),newBoundary=Date.UTC(2026,10,16,16);
   const owner=[{id:1,configSha:'test'}];
+  const file=join(root,'old-snapshot-session.json');
+  writeFileSync(file,JSON.stringify({cookie:'synthetic-snapshot-session'}),{mode:0o600});
+  registerAuth(store,1,file,'xhs');
   const snapshot=store.queue('xhs','account:1',{type:'account_snapshot'},owner);
   const previous=store.begin(snapshot,now);
   const slot=store.reserve(previous,'/snapshot',now);
@@ -428,11 +433,40 @@ test('指数客户端保留配额异常，只排队一次，不伪造批量网�
  }finally{db.close();}
 });
 
+test('指数每日额度按平台登录计数，耗尽后其他登录仍可采集',async()=>{
+ const {db,store}=setup();try{
+  const shared=createAccount(db,'同一平台帐号'), independent=createAccount(db,'另一个平台帐号');
+  auth(db,1,'session-first');
+  auth(db,shared.id,'session-same-platform-id');
+  auth(db,independent.id,'session-other-platform-id');
+  db.prepare("UPDATE collection_limits SET daily_limit=1 WHERE provider='index'").run();
+  const task=store.queue('index','account:1',{type:'topic_dates'},[{id:1,configSha:'test'}]);
+  const slot=store.reserve(store.begin(task,base),'/index-dates',base);
+  store.requestResult(slot.id,'{}',500);
+  const identify=(id)=>async()=>({id,name:id,handle:null});
+  await resolveCredentialIdentity(db,1,'index',identify('shared'));
+  await resolveCredentialIdentity(db,shared.id,'index',identify('shared'));
+  await resolveCredentialIdentity(db,independent.id,'index',identify('independent'));
+  const usage=(id)=>collectionStatus(db,account(db,id),store,base).budgets.find(b=>b.provider==='index').used;
+  assert.deepEqual([usage(1),usage(shared.id),usage(independent.id)],[1,1,0]);
+  const add=db.prepare("INSERT INTO account_sources(account_id,kind,source_key,name) VALUES(?,'blogger_search',?,?)");
+  add.run(shared.id,'甲','甲');add.run(independent.id,'乙','乙');
+  assert.equal(pendingBloggerAccount(db,base),independent.id);
+  const sessions=[];
+  const result=await runCollection(store,{accountIds:[shared.id,independent.id],only:'author',clock:()=>base,sleep:async()=>{},
+    fetchImpl:async(_input,init)=>{sessions.push(init.headers.cookie);return json({data:{userlist:[]}});}});
+  assert.deepEqual(sessions,['session-other-platform-id']);
+  assert.equal(result.accounts[shared.id].deferred,1);
+  assert.equal(result.accounts[independent.id].completed,1);
+  assert.deepEqual([usage(1),usage(shared.id),usage(independent.id)],[1,1,1]);
+ }finally{db.close();}
+});
+
 test('同级发现任务在每次执行后重新按账号公平轮转',async()=>{
  const {db,store}=setup();try{
   const second=createAccount(db,'另一个发现账号');
   for(const id of [1,second.id]){config(db,id,{index:{discovery:null,tasks:[{type:'videos',keyword:'甲'},{type:'videos',keyword:'乙'},{type:'videos',keyword:'丙'}]}});auth(db,id,'owner-'+id);}
-  db.prepare("UPDATE collection_limits SET daily_limit=4 WHERE provider='index'").run();const owners=[];
+  db.prepare("UPDATE collection_limits SET per_tick=4 WHERE provider='index'").run();const owners=[];
   const fetchImpl=async(input,init)=>{const p=new URL(String(input)).pathname;if(p.endsWith('get_topic_valid_date'))return json({data:{valid_day:'20261105',valid_week:'20261101'}});owners.push(init.headers.cookie);return json({data:p.endsWith('query_topic')?{topic_list:[]}:{data:[]}});};
   await runCollection(store,{clock:()=>base,fetchImpl,sleep:async()=>{}});assert.equal(owners.length,2);assert.equal(new Set(owners).size,2);
  }finally{db.close();}

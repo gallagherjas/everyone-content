@@ -21,11 +21,13 @@ interface BloggerRow extends Partial<BloggerSearchStatus> { id: number; kind: "b
 
 const RUN_TONE: Record<string, BadgeTone> = { ok: "up", failed: "danger", running: "warn", cached: "gray", deferred: "warn" };
 /** 单个来源的今日额度卡：用量/上限 + 细进度条；未连接的来源弱化展示 */
-function BudgetCard({ label, used, limit, connected }: { label: string; used: number; limit: number; connected: boolean }) {
-  const pct = Math.min(100, Math.round((used / Math.max(1, limit)) * 100));
+function BudgetCard({ label, budget, connected }: { label: string; budget: Budget; connected: boolean }) {
+  const { used, daily_limit, account_name } = budget;
+  const pct = Math.min(100, Math.round((used / Math.max(1, daily_limit)) * 100));
   return <div className={`min-w-36 flex-1 rounded-xl border border-line bg-canvas px-4 py-3 ${connected ? "" : "opacity-50"}`}>
-    <div className="flex items-baseline justify-between gap-2 text-sm"><span className="text-muted">{label}</span><span className="tabular-nums">{used}/{limit}</span></div>
-    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-ink/[0.06]"><div className={`h-full rounded-full transition-all ${pct >= 100 ? "bg-danger" : "bg-brand"}`} style={{ width: `${pct}%` }} /></div>
+    <div className="flex items-baseline justify-between gap-2 text-sm"><span className="text-muted">{label}</span><span className="tabular-nums">{connected ? `${used}/${daily_limit}` : '未连接'}</span></div>
+    {account_name && <div className="mt-1 text-xs text-muted">{account_name}</div>}
+    {connected && <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-ink/[0.06]"><div className={`h-full rounded-full transition-all ${pct >= 100 ? "bg-danger" : "bg-brand"}`} style={{ width: `${pct}%` }} /></div>}
   </div>;
 }
 
@@ -95,10 +97,10 @@ export default function CollectPage({ current, onUpdate, jumpTo }: { current: Ac
     <div className="space-y-5">
       <KeepAlive active={section === "overview"}><section className="panel">
         <h2 className="font-semibold text-xl">采集总览</h2>
-        <p className="mt-1.5 text-sm text-muted">额度跨账号共用，每日北京时间 00:00 重置。</p>
+        <p className="mt-1.5 text-sm text-muted">同一来源的同一平台帐号共用额度，每日北京时间 00:00 重置。</p>
         <div className="mt-4 flex flex-wrap gap-2">
           {[...(state?.budgets ?? [])].sort((a, b) => (a.provider === 'index' ? 0 : 1) - (b.provider === 'index' ? 0 : 1))
-            .map(b => <BudgetCard key={b.provider} label={names[b.provider] ?? b.provider} used={b.used} limit={b.daily_limit} connected={!!state?.credentials?.[b.provider]} />)}
+            .map(b => <BudgetCard key={b.provider} label={names[b.provider] ?? b.provider} budget={b} connected={!!state?.credentials?.[b.provider]} />)}
         </div>
         <CollectionControls archived={archived} credentials={state?.credentials} blockers={state?.blockers}
           hasKeywords={!!state?.discovery?.keywords.length} hasBloggers={bloggers.some(row => row.status === "ready")}
