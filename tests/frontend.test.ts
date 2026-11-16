@@ -95,7 +95,12 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
       sharedIndex = true; data = indexAuth();
     }
     else if (url.pathname === '/api/auth/index') data = indexAuth();
-    else if (/^\/api\/auth\/[\w-]+$/.test(url.pathname)) data = { provider: url.pathname.split('/').at(-1), label: '平台', status: 'missing', configured: false, message: '尚未连接。' };
+    else if (/^\/api\/auth\/[\w-]+$/.test(url.pathname)) {
+      const provider = url.pathname.split('/').at(-1);
+      data = provider === 'douyin'
+        ? { provider, status: 'verified', configured: true, message: '登录已通过采集验证。', account_name: '创作后台登录帐号' }
+        : { provider, status: 'missing', configured: false, message: '尚未连接。' };
+    }
     else if (url.pathname === '/api/sources') data = { keywords: sources.filter(s => s.account === account) };
     else if (/^\/api\/sources\/\d+$/.test(url.pathname) && method === 'DELETE') {
       const index = sources.findIndex(s => s.account === account && s.id === Number(url.pathname.split('/').at(-1)));
@@ -229,13 +234,14 @@ test('首个账号由用户创建；页面缓存保留编辑状态，切换账�
     assert.equal(panel(), undefined);
     const reuseIndex = field('复用其他帐号的抖音指数登录');
     assert.equal(reuseIndex.previousElementSibling.textContent, '扫码连接');
-    assert.match(reuseIndex.textContent, /账号2 · 测试抖音号/);
+    assert.match(reuseIndex.textContent, /测试抖音号 · 账号2/);
     await act(async () => {
       reuseIndex.value = '2';
       reuseIndex.dispatchEvent(new window.Event('change', { bubbles: true }));
     });
     assert.deepEqual(requests.find(r => r.url.pathname === '/api/auth/index/reuse').body, { source_account_id: 2 });
-    assert.match(field('抖音指数登录状态').textContent, /测试抖音号.*共用会话：账号1、账号2/);
+    assert.equal(field('抖音指数登录状态').textContent, '登录帐号：测试抖音号 · 登录已通过采集验证。');
+    assert.equal(field('抖音创作后台登录状态').textContent, '登录帐号：创作后台登录帐号 · 登录已通过采集验证。');
     await act(async () => { reminder().click(); });
     await click('查看日志');
     assert.ok(visible('h2').some(el => el.textContent === '采集日志'));

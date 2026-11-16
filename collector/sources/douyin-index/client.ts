@@ -1,7 +1,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { ORIGIN, PATHS, decode, unwrap, validateData } from './protocol.ts';
 
-export interface IndexAuth { cookie: string; userAgent?: string; accountName?: string }
+export interface IndexAuth { cookie: string; userAgent?: string }
 
 export function authFromCookies(cookies: any[], userAgent?: string): IndexAuth {
   const now = Date.now()/1000;
@@ -23,8 +23,7 @@ export function loadAuth(file: string | undefined, env: Record<string, string | 
   }
   if (typeof auth.cookie !== 'string' || !auth.cookie.trim() || /[\r\n]/.test(auth.cookie)) throw new Error('invalid_auth_cookie');
   if (auth.userAgent !== undefined && (typeof auth.userAgent !== 'string' || /[\r\n]/.test(auth.userAgent))) throw new Error('invalid_user_agent');
-  const accountName = typeof auth.accountName === 'string' ? auth.accountName.trim().slice(0, 120) : '';
-  return { cookie: auth.cookie, userAgent: auth.userAgent, ...(accountName ? { accountName } : {}) };
+  return { cookie: auth.cookie, userAgent: auth.userAgent };
 }
 export class ReadClient {
   auth: IndexAuth; fetch: typeof fetch; intervalMs: number; sleep: (ms: number) => Promise<void>; last: number; busy: boolean;

@@ -9,7 +9,8 @@ import { sourceBlocker } from '../collector/core/availability.ts';
 import { bindCredential, credentialBinding, registerAuth, resumeSource } from '../collector/core/settings.ts';
 import { loadAuth, type IndexAuth } from '../collector/sources/douyin-index/client.ts';
 import { writePrivateAuth } from '../collector/sources/platform/session.ts';
-import { DOUYIN_PROFILE_URL, douyinAccountName } from '../collector/sources/platform/snapshot.ts';
+import { platformAccountLabel } from '../collector/sources/platform/identity.ts';
+import { copyCredentialIdentity, credentialIdentity, removeUnusedCredentialIdentities } from './platform-identities.ts';
 
 const sessionFolder = (directory: string) => join(directory, 'authorization', 'index-sessions');
 const managedFile = (file: string, directory: string) => dirname(dirname(file)) === sessionFolder(directory)
@@ -31,6 +32,7 @@ export function saveIndexSession(db: DatabaseSync, id: number, auth: IndexAuth, 
   try {
     writePrivateAuth(file, auth);
     registerAuth(new CollectionStore(db, directory), id, file);
+    removeUnusedCredentialIdentities(db);
   } catch (error) {
     removeUnusedIndexSession(db, file, directory);
     throw error;
@@ -38,8 +40,7 @@ export function saveIndexSession(db: DatabaseSync, id: number, auth: IndexAuth, 
   removeUnusedIndexSession(db, previous, directory);
 }
 
-export async function reuseIndexSession(db: DatabaseSync, id: number, sourceId: number, directory = DATA,
-  identify?: (auth: IndexAuth) => Promise<string | undefined>) {
+export function reuseIndexSession(db: DatabaseSync, id: number, sourceId: number, directory = DATA) {
   activeAccount(db, id);
   if (sourceId === id) throw new InputError('请选择其他帐号');
   activeAccount(db, sourceId);
@@ -50,17 +51,13 @@ export async function reuseIndexSession(db: DatabaseSync, id: number, sourceId: 
   if (previous === source.auth_path) return;
   const shared = managedFile(source.auth_path, directory) ? source.auth_path : newSessionFile(directory);
   try {
-    if (shared !== source.auth_path) {
-      const auth = loadAuth(source.auth_path, {});
-      auth.accountName ??= await identify?.(auth).catch(() => undefined);
-      activeAccount(db, id);
-      activeAccount(db, sourceId);
-      writePrivateAuth(shared, auth);
-    }
+    if (shared !== source.auth_path) writePrivateAuth(shared, loadAuth(source.auth_path, {}));
     atomic(db, () => {
       db.prepare("UPDATE collection_credentials SET auth_path=? WHERE provider='index' AND auth_path=?").run(shared, source.auth_path);
       const scope = bindCredential(db, id, 'index', shared);
       resumeSource(db, id, 'index', scope, true);
+      if (shared !== source.auth_path) copyCredentialIdentity(db, 'index', source.auth_path, shared);
+      removeUnusedCredentialIdentities(db);
     });
   } catch (error) {
     if (shared !== source.auth_path) removeUnusedIndexSession(db, shared, directory);
@@ -70,33 +67,18 @@ export async function reuseIndexSession(db: DatabaseSync, id: number, sourceId: 
   removeUnusedIndexSession(db, previous, directory);
 }
 
-export async function identifyIndexAccount(auth: IndexAuth): Promise<string | undefined> {
-  const response = await fetch(DOUYIN_PROFILE_URL, {
-    headers: { cookie: auth.cookie, referer: new URL('/', DOUYIN_PROFILE_URL).href,
-      ...(auth.userAgent ? { 'user-agent': auth.userAgent } : {}) },
-    redirect: 'error', signal: AbortSignal.timeout(4000),
-  });
-  if (response.ok) return douyinAccountName(await response.json());
-  await response.body?.cancel();
-}
-
 export function indexSessionDetails(db: DatabaseSync, id: number) {
   const bindings = db.prepare(`SELECT a.id,a.name,a.status,c.auth_path FROM collection_credentials c
     JOIN accounts a ON a.id=c.account_id WHERE c.provider='index' ORDER BY a.id`).all() as
     { id: number; name: string; status: string; auth_path: string }[];
   const current = bindings.find(row => row.id === id);
-  const accountNameFor = (file: string) => {
-    try { return loadAuth(file, {}).accountName ?? null; }
-    catch { return null; }
-  };
   const used = new Set<string>();
   const reuseAccounts = bindings.flatMap(row => {
     if (row.status !== 'active' || row.auth_path === current?.auth_path || used.has(row.auth_path) || sourceBlocker(db, row.id, 'index')) return [];
     used.add(row.auth_path);
-    return [{ id: row.id, name: row.name, account_name: accountNameFor(row.auth_path) }];
+    return [{ id: row.id, name: row.name, account_name: platformAccountLabel(credentialIdentity(db, 'index', row.auth_path)) }];
   });
   return {
-    account_name: current ? accountNameFor(current.auth_path) : null,
     session_accounts: current ? bindings.filter(row => row.auth_path === current.auth_path).map(row => row.name) : [],
     reuse_accounts: reuseAccounts,
   };

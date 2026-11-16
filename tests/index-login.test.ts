@@ -7,6 +7,8 @@ import { dirname, join } from 'node:path';
 import { migrate } from '../db/migrate.ts';
 import { createAccount } from '../lib/accounts.ts';
 import { PlatformLoginManager, saveSession } from '../lib/platform-login.ts';
+import { fetchPlatformIdentity } from '../collector/sources/platform/identity.ts';
+import { writePrivateAuth } from '../collector/sources/platform/session.ts';
 const root = mkdtempSync(join(tmpdir(), 'everyone-login-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 const session = { name: 'sessionid', value: 'synthetic-test-session', domain: '.douyin.com', path: '/', expires: -1 };
@@ -15,18 +17,21 @@ function windowWith(cookies: () => Promise<any[]>, userAgent = 'Test Agent') {
   let closed = false;
   return { cookies, userAgent, isClosed: () => closed, close: async () => { closed = true; } };
 }
-const saveInto = (db: DatabaseSync) => (provider: string, id: number, cookies: any[], agent?: string, accountName?: string) =>
-  saveSession(db, provider, id, cookies, agent, root, accountName);
+const saveInto = (db: DatabaseSync) => (provider: string, id: number, cookies: any[], agent?: string) =>
+  saveSession(db, provider, id, cookies, agent, root);
 
 test('匿名和其他域会话不保存，登录后凭据按账号私密落盘，不回显或自动采集', async () => {
   const db = database();
   try {
     let step = 0;
     const window = windowWith(async () => step++ === 0 ? [{ ...session, domain: 'unrelated.test' }] : [session, { ...session, name: 'other', domain: 'unrelated.test' }]);
-    const manager = new PlatformLoginManager({ launch: async () => ({ ...window, accountName: async () => '创作者（douyin_test）' }),
-      sleep: async () => {}, save: saveInto(db) });
+    const manager = new PlatformLoginManager({ launch: async () => window, sleep: async () => {}, save: saveInto(db),
+      identify: async (_provider, auth) => {
+        assert.equal(auth.cookie, 'sessionid=synthetic-test-session');
+        return { id: 'MS4wLjAB-test', name: '创作者', handle: 'douyin_test' };
+      } });
     manager.start(db, 1, 'index'); await manager.settle('index', 1);
-    const state = manager.state(db, 1, 'index');
+    const state = await manager.inspect(db, 1, 'index');
     assert.equal(state.status, 'configured'); assert.equal(state.configured, true);
     assert.equal(state.account_name, '创作者（douyin_test）');
     assert.deepEqual(state.session_accounts, ['登录测试账号']);
@@ -44,6 +49,49 @@ test('匿名和其他域会话不保存，登录后凭据按账号私密落盘�
     assert.equal(new PlatformLoginManager().state(db, 1, 'index').status, 'configured');
     db.prepare("INSERT INTO collection_provider_state(provider,scope,paused,error) VALUES('index','account:1',1,'login_required')").run();
     assert.equal(manager.state(db, 1, 'index').status, 'expired');
+  } finally { db.close(); }
+});
+test('平台身份从对应的自查接口获取，替换会话后旧身份失效', async () => {
+  const db = database();
+  try {
+    const providerSessions = [
+      ['index', session, '指数帐号', 'index_test'],
+      ['douyin', { ...session, value: 'douyin-creator-test' }, '抖音后台', 'douyin_test'],
+      ['xhs', { ...session, name: 'web_session', domain: '.xiaohongshu.com' }, '小红书测试', 'xhs_test'],
+      ['bili', { ...session, name: 'SESSDATA', domain: '.bilibili.com' }, 'B 站测试', '9007199254740993'],
+    ] as const;
+    const calls: string[] = [];
+    const manager = new PlatformLoginManager({ identify: async (provider, auth) => {
+      const entry = providerSessions.find(row => row[0] === provider)!;
+      assert.ok(auth.cookie.includes(entry[1].value) || auth.cookie === 'sessionid=updated-session');
+      calls.push(provider);
+      return fetchPlatformIdentity(provider, auth, async (input, init) => {
+        const url = new URL(String(input));
+        if (provider === 'bili') {
+          assert.equal(url.hostname, 'api.bilibili.com');
+          assert.equal(new Headers(init?.headers).get('cookie'), `SESSDATA=${entry[1].value}`);
+          return new Response('{"code":0,"data":{"isLogin":true,"mid":9007199254740993,"uname":"B 站测试"}}');
+        }
+        if (provider === 'xhs') {
+          assert.equal(url.pathname, '/api/galaxy/user/info');
+          return Response.json({ code: 0, success: true, data: { userId: 'a'.repeat(24), userName: entry[2], redId: entry[3] } });
+        }
+        assert.equal(url.hostname, 'creator.douyin.com');
+        return Response.json({ status_code: 0, user_profile: { secret_id: `MS4wLjAB-${provider}`,
+          nick_name: auth.cookie === 'sessionid=updated-session' ? '更新后的抖音帐号' : entry[2], unique_id: entry[3] } });
+      });
+    } });
+    for (const [provider, cookie, name, handle] of providerSessions) {
+      saveSession(db, provider, 1, [cookie, { ...cookie, name: 'other_local_cookie' }], 'Test Agent', root);
+      assert.equal((await manager.inspect(db, 1, provider)).account_name, `${name}（${handle}）`);
+      assert.equal((await manager.inspect(db, 1, provider)).account_name, `${name}（${handle}）`);
+    }
+    assert.deepEqual(calls, ['index', 'douyin', 'xhs', 'bili']);
+    const row = db.prepare("SELECT auth_path FROM collection_credentials WHERE provider='douyin'").get()!;
+    writePrivateAuth(String(row.auth_path), { cookie: 'sessionid=updated-session' });
+    assert.equal(manager.state(db, 1, 'douyin').account_name, null);
+    assert.equal((await manager.inspect(db, 1, 'douyin')).account_name, '更新后的抖音帐号（douyin_test）');
+    assert.equal(manager.state(db, 1, 'index').account_name, '指数帐号（index_test）');
   } finally { db.close(); }
 });
 test('平台哨兵 cookie 隔离：抖音会话不构成小红书或B站登录', async () => {

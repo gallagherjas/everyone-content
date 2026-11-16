@@ -18,6 +18,7 @@ after(() => rmSync(dir, { recursive: true, force: true }));
 const { migrate } = await import('../db/migrate.ts');
 const { createAccount } = await import('../lib/accounts.ts');
 const { defaultSchedules } = await import('../lib/collection-schedule.ts');
+const { resolveCredentialIdentity } = await import('../lib/platform-identities.ts');
 
 test('首次安装预置各来源采集次数上限；再次开库保留用户创建的账号和配置', () => {
   const db = new DatabaseSync(':memory:');
@@ -157,12 +158,14 @@ test('账号隔离、画像生效与指数配置可通过本地API完成', async
     const authDir = join(process.env.EVERYONE_CONTENT_DATA_DIR!, 'authorization', String(first.id));
     const original = join(authDir, 'index.json');
     mkdirSync(authDir, { recursive: true, mode: 0o700 });
-    writeFileSync(original, JSON.stringify({ cookie: 'synthetic-index-session', accountName: '指数测试帐号' }), { mode: 0o600 });
+    writeFileSync(original, JSON.stringify({ cookie: 'synthetic-index-session' }), { mode: 0o600 });
     const bindings = new DatabaseSync(filename);
     let sharedFile: string;
     try {
       bindings.prepare('INSERT INTO collection_credentials VALUES(?,?,?,?)')
         .run(first.id, 'index', original, `account:${first.id}`);
+      await resolveCredentialIdentity(bindings, first.id, 'index', async () =>
+        ({ id: 'MS4wLjAB-test', name: '指数测试帐号', handle: null }));
       const choices = (await request('/api/auth/index', second.id)).reuse_accounts;
       assert.deepEqual(choices, [{ id: first.id, name: first.name, account_name: '指数测试帐号' }]);
       assert.match((await request('/api/auth/index/reuse', second.id, 'POST', { source_account_id: second.id }, 400)).error, /其他帐号/);

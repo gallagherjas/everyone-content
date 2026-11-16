@@ -53,14 +53,6 @@ export const SNAPSHOT_PLATFORMS: Record<string, PlatformSnapshot> = {
 };
 export const DOUYIN_PROFILE_URL = SNAPSHOT_PLATFORMS.douyin.origin + DOUYIN_PROFILE_PATH;
 
-export function douyinAccountName(body: any): string | undefined {
-  if (body?.status_code !== 0) return undefined;
-  const value = (...names: unknown[]) => names.find(name => typeof name === 'string' && name.trim()) as string | undefined;
-  const nickname = value(body.user_profile?.nick_name, body.douyin_user_verify_info?.nick_name)?.trim();
-  const handle = value(body.user_profile?.unique_id, body.douyin_user_verify_info?.douyin_unique_id)?.trim();
-  return nickname && handle ? `${nickname}（${handle}）` : nickname || handle;
-}
-
 export interface Snapshot { uid: string; metrics: { fans: number | null; likes: number | null; works: number | null; views: number | null } }
 
 // “1.2万”/"3,406"/"890" 这类展示值统一为数字;解析不了返回 null,不强算。

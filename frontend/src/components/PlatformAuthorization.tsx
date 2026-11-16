@@ -57,16 +57,17 @@ export default function PlatformAuthorization({ disabled }: { disabled: boolean 
         const members = state?.session_accounts ?? [];
         const shared = members.length > 1;
         const reuse = state?.reuse_accounts ?? [];
-        const identity = state?.account_name ? `抖音帐号：${state.account_name}` : '';
-        const association = members.length ? `${shared ? '共用会话' : '工作台帐号'}：${members.join('、')}` : '';
+        const identity = state?.account_name
+          ? `${state.status === 'expired' ? '上次登录' : '登录帐号'}：${state.account_name}`
+          : state?.configured && !connecting(state.status) && state.status !== 'expired' ? '平台帐号未识别' : '';
         return <div key={p.provider} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line/70 bg-canvas px-4 py-3">
           <div className="min-w-0">
             <p className="text-sm">{p.label}</p>
             <p className="mt-0.5 text-xs leading-5 text-muted">{p.hint}</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <span className="text-sm text-muted" aria-label={`${p.label}登录状态`}>
-              {[state?.message ?? '正在检查连接状态…', identity, association].filter(Boolean).join(' · ')}
+            <span className="min-w-0 break-words text-sm text-muted" aria-label={`${p.label}登录状态`}>
+              {[identity, state?.message ?? '正在检查连接状态…'].filter(Boolean).join(' · ')}
             </span>
             {state?.attempt_message && <span className="text-xs text-warn">{state.attempt_message}</span>}
             {connecting(state?.status)
@@ -80,7 +81,7 @@ export default function PlatformAuthorization({ disabled }: { disabled: boolean 
                   onChange={e => { if (e.target.value) void action(p.provider, 'reuse', Number(e.target.value)); }}>
                   <option value="" disabled>复用其他帐号</option>
                   {reuse.map(option => <option key={option.id} value={option.id}>
-                    {option.account_name ? `${option.name} · ${option.account_name}` : option.name}
+                    {option.account_name ? `${option.account_name} · ${option.name}` : option.name}
                   </option>)}
                 </select>}
               </div>}

@@ -103,9 +103,9 @@ test('复用指数授权共享验证与失效状态，采集轮次仍按工作�
   const { db, store } = setup();
   try {
     const second = createAccount(db, '复用帐号'), third = createAccount(db, '独立帐号');
-    saveIndexSession(db, 1, { cookie: 'source-session', accountName: '来源帐号' }, root);
+    saveIndexSession(db, 1, { cookie: 'source-session' }, root);
     saveIndexSession(db, third.id, { cookie: 'other-session' }, root);
-    await reuseIndexSession(db, second.id, 1, root);
+    reuseIndexSession(db, second.id, 1, root);
     const opts = { accountIds: [second.id], only: 'topic_rank', clock: () => base, sleep: async () => {} };
     const validResponse = () => json({ data: { valid_day: '20261106', valid_week: '20261101' } });
     await runCollection(store, { ...opts, fetchImpl: async (_input: any, init: any) => {
@@ -126,7 +126,7 @@ test('复用指数授权共享验证与失效状态，采集轮次仍按工作�
       assert.equal(init.headers.cookie, 'renewed-session');
       return validResponse();
     } });
-    await reuseIndexSession(db, 1, third.id, root);
+    reuseIndexSession(db, 1, third.id, root);
     const binding = (id: number) => db.prepare("SELECT auth_path FROM collection_credentials WHERE account_id=? AND provider='index'").get(id).auth_path;
     assert.equal(binding(1), binding(third.id));
     assert.notEqual(binding(1), binding(second.id));

@@ -36,6 +36,7 @@ import { AUTH_ERROR, COLLECTION_PROVIDERS, COLLECTION_PROVIDER_NAMES, COLLECTION
 import { availableProviders, sourceBlocker } from '../collector/core/availability.ts';
 import { credentialBinding, resumeSource } from '../collector/core/settings.ts';
 import { removeUnusedIndexSession } from '../lib/index-sessions.ts';
+import { removeUnusedCredentialIdentities } from '../lib/platform-identities.ts';
 import { collectionStatus } from '../collector/core/status.ts';
 import { normalize } from '../collector/core/discovery.ts';
 import { planCollection } from '../collector/core/planner.ts';
@@ -207,8 +208,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
     return json(res, context(db, id, url.searchParams.get('strategy_sha')));
   if (method !== 'GET' && !/^\/api\/(auth\/[\w-]+\/cancel|accounts\/\d+)$/.test(path)) activeAccount(db, id);
   const auth = path.match(/^\/api\/auth\/([\w-]+)(?:\/(start|cancel|reuse))?$/);
-  if (auth && LOGIN_PLATFORMS[auth[1]]) {
-    const provider = auth[1];
+  if (auth && Object.hasOwn(LOGIN_PLATFORMS, auth[1])) {
+    const provider = auth[1] as CollectionProvider;
     if (auth[2] === 'start' && method === 'POST') return json(res, platformLogin.start(db, id, provider), 202);
     if (auth[2] === 'cancel' && method === 'POST') return json(res, await platformLogin.cancel(db, id, provider));
     if (auth[2] === 'reuse' && provider === 'index' && method === 'POST') {
@@ -216,7 +217,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
       if (!Number.isSafeInteger(source_account_id) || source_account_id < 1) throw new InputError('请选择要复用会话的帐号');
       return json(res, await platformLogin.reuseIndex(db, id, source_account_id));
     }
-    if (!auth[2] && method === 'GET') return json(res, platformLogin.state(db, id, provider));
+    if (!auth[2] && method === 'GET') return json(res, await platformLogin.inspect(db, id, provider));
   }
   const acct = path.match(/^\/api\/accounts\/(\d+)$/);
   if (acct && method === 'PUT') {
@@ -251,6 +252,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, db: Data
           'strategy_audit', 'collection_run_accounts', 'collection_task_accounts', 'collection_credentials'])
           db.prepare(`DELETE FROM ${table} WHERE account_id=?`).run(id);
         db.prepare('DELETE FROM accounts WHERE id=?').run(id);
+        removeUnusedCredentialIdentities(db);
       });
       removeUnusedIndexSession(db, file);
       dropProfile(id);

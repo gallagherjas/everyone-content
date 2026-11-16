@@ -44,8 +44,8 @@ function migrateBeijingDays(db: DatabaseSync) {
 
 export function migrate(db: DatabaseSync, _filename: string) {
   const version = Number(db.prepare('PRAGMA user_version').get()?.user_version);
-  if (version === 8) return;
-  if (![0, 1, 2, 3, 4, 5, 6, 7].includes(version)) throw new Error('数据库版本不兼容，请使用本项目的数据目录');
+  if (version === 9) return;
+  if (![0, 1, 2, 3, 4, 5, 6, 7, 8].includes(version)) throw new Error('数据库版本不兼容，请使用本项目的数据目录');
   db.exec('PRAGMA journal_mode=WAL; BEGIN IMMEDIATE');
   try {
     // v4 及更早：跑基线建表并逐步升到 v4；v4 库只需追平 v5，避免重复执行 v3/v4 重建。
@@ -164,9 +164,19 @@ export function migrate(db: DatabaseSync, _filename: string) {
     }
     if (version < 7) migrateBeijingDays(db);
     // v8：从采集队列移除博主有效日期，保留历史查询记录。
-    db.exec(`DELETE FROM collection_task_accounts WHERE task_key IN (
+    if (version < 8) db.exec(`DELETE FROM collection_task_accounts WHERE task_key IN (
       SELECT key FROM collection_tasks WHERE provider='index' AND operation='author_dates'
-    ); PRAGMA user_version=8; COMMIT`);
+    )`);
+    db.exec(`CREATE TABLE IF NOT EXISTS collection_credential_identities (
+      provider TEXT NOT NULL,
+      auth_path TEXT NOT NULL,
+      revision TEXT NOT NULL,
+      platform_account_id TEXT,
+      nickname TEXT,
+      handle TEXT,
+      checked_at INTEGER NOT NULL,
+      PRIMARY KEY(provider,auth_path)
+    ); PRAGMA user_version=9; COMMIT`);
   } catch (error) {
     db.exec('ROLLBACK');
     throw error;
