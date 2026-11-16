@@ -17,7 +17,7 @@ everyone-content/
 │   └── sources/
 │       ├── douyin-index/      抖音指数协议、客户端和授权读取
 │       └── platform/          抖音、小红书和 B 站创作后台的会话读取与快照采集
-├── video-analysis/           本地视频语音转写实验，独立于采集流程
+├── video-analysis/           视频截图工具，独立于采集流程
 ├── lib/                      账号、画像版本、数据库连接、作品与定时调度
 ├── db/                       SQLite 表结构和迁移
 ├── skills/                   Agent 执行的业务流程
